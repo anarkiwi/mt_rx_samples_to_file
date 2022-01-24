@@ -6,7 +6,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(mt_rx_samples_to_file)
-include_directories(${PROJECT_SOURCE_DIR})
+set(CMAKE_BUILD_TYPE Release)
 add_executable(mt_rx_samples_to_file mt_rx_samples_to_file.cpp)
 
 find_package(UHD 3.15.0 REQUIRED)
