@@ -44,9 +44,9 @@ inline void write_samples()
     size_t read_ptr;
     while (queue.pop(read_ptr)) {
 	buffer_p = buffers + read_ptr;
-        if (!outbuf.empty()) {
+	if (!outbuf.empty()) {
 	    out.write((const char*)buffer_p->data(), buffer_p->capacity());
-        }
+	}
 	calls += buffer_p->capacity();
     }
 }
@@ -72,6 +72,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     const size_t& channel,
     const std::string& file,
     size_t samps_per_buff,
+    size_t zlevel,
     unsigned long long num_requested_samples,
     double time_requested       = 0.0,
     bool bw_summary             = false,
@@ -109,7 +110,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 	outfile.open(dotfile.c_str(), std::ofstream::binary);
 	if (file.back() == 'z') {
 	    std::cout << "writing gzip compressed output" << std::endl;
-	    outbuf.push(boost::iostreams::gzip_compressor(1));
+	    outbuf.push(boost::iostreams::gzip_compressor(zlevel));
 	}
 	outbuf.push(outfile);
     }
@@ -310,7 +311,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 {
     // variables to be set by po
     std::string args, file, type, ant, subdev, ref, wirefmt;
-    size_t channel, total_num_samps, spb;
+    size_t channel, total_num_samps, spb, zlevel;
     double rate, freq, gain, bw, total_time, setup_time, lo_offset;
 
     // setup the program options
@@ -324,6 +325,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 	("nsamps", po::value<size_t>(&total_num_samps)->default_value(0), "total number of samples to receive")
 	("duration", po::value<double>(&total_time)->default_value(0), "total number of seconds to receive")
 	("time", po::value<double>(&total_time), "(DEPRECATED) will go away soon! Use --duration instead")
+	("zlevel", po::value<size_t>(&zlevel)->default_value(1), "default compression level")
 	("spb", po::value<size_t>(&spb)->default_value(10000), "samples per buffer")
 	("rate", po::value<double>(&rate)->default_value(1e6), "rate of incoming samples")
 	("freq", po::value<double>(&freq)->default_value(0.0), "RF center frequency in Hz")
@@ -480,6 +482,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 	channel,                  \
 	file,                     \
 	spb,                      \
+	zlevel,                   \
 	total_num_samps,          \
 	total_time,               \
 	bw_summary,               \
