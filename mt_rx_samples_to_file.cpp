@@ -43,8 +43,8 @@ inline void write_samples()
     write_buffer_t *buffer_p;
     size_t read_ptr;
     while (queue.pop(read_ptr)) {
-        buffer_p = buffers + read_ptr;
-        out.write((const char*)buffer_p->data(), buffer_p->capacity());
+	buffer_p = buffers + read_ptr;
+	out.write((const char*)buffer_p->data(), buffer_p->capacity());
 	calls += buffer_p->capacity();
     }
 }
@@ -52,7 +52,7 @@ inline void write_samples()
 void writer_worker(void)
 {
     while (!writer_done) {
-        write_samples();
+	write_samples();
     }
     write_samples();
 }
@@ -94,13 +94,17 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 
     uhd::rx_metadata_t md;
     std::ofstream outfile;
+    boost::filesystem::path path(file);
+    std::string dirname(path.parent_path().filename().c_str());
+    std::string basename(path.filename().c_str());
+    std::string dotfile = dirname + "/." + file;
 
     for (size_t i = 0; i < buffer_count; ++i) {
 	buffers[i].resize(max_buffer_size);
     }
 
     if (not null) {
-	outfile.open(file.c_str(), std::ofstream::binary);
+	outfile.open(dotfile.c_str(), std::ofstream::binary);
 	if (file.back() == 'z') {
 	    std::cout << "writing gzip compressed output" << std::endl;
 	    outbuf.push(boost::iostreams::gzip_compressor(1));
@@ -182,7 +186,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 	    buffer_p->resize(samp_bytes);
 	    buffer_p->shrink_to_fit();
 	    if (samp_bytes != buffer_p->capacity()) {
-	        std::cout << "bad!" << std::endl;
+		std::cout << "bad!" << std::endl;
 	    }
 	}
 	if (!queue.push(write_ptr)) {
@@ -193,11 +197,11 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 	}
 
 	if (enable_size_map) {
-            SizeMap::iterator it = mapSizes.find(num_rx_samps);
-            if (it == mapSizes.end())
-                mapSizes[num_rx_samps] = 0;
-            mapSizes[num_rx_samps] += 1;
-        }
+	    SizeMap::iterator it = mapSizes.find(num_rx_samps);
+	    if (it == mapSizes.end())
+		mapSizes[num_rx_samps] = 0;
+	    mapSizes[num_rx_samps] += 1;
+	}
 
 	if (bw_summary) {
 	    last_update_samps += num_rx_samps;
@@ -227,9 +231,10 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 	outfile.close();
 
 	if (overflows) {
-	    boost::filesystem::path path(file);
-            std::string overflow_name = std::string(path.parent_path().filename().c_str()) + "/overflow-" + std::string(path.filename().c_str());
-	    rename(file.c_str(), overflow_name.c_str());
+	    std::string overflow_name = dirname + "/overflow-" + file;
+	    rename(dotfile.c_str(), overflow_name.c_str());
+	} else {
+	    rename(dotfile.c_str(), file.c_str());
 	}
     }
 
