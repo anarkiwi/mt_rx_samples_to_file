@@ -44,7 +44,9 @@ inline void write_samples()
     size_t read_ptr;
     while (queue.pop(read_ptr)) {
 	buffer_p = buffers + read_ptr;
-	out.write((const char*)buffer_p->data(), buffer_p->capacity());
+        if (!outbuf.empty()) {
+	    out.write((const char*)buffer_p->data(), buffer_p->capacity());
+        }
 	calls += buffer_p->capacity();
     }
 }
@@ -94,9 +96,9 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 
     uhd::rx_metadata_t md;
     std::ofstream outfile;
-    boost::filesystem::path path(file);
-    std::string dirname(path.parent_path().filename().c_str());
-    std::string basename(path.filename().c_str());
+    boost::filesystem::path orig_path(file);
+    std::string basename(orig_path.filename().c_str());
+    std::string dirname(boost::filesystem::canonical(orig_path.parent_path()).c_str());
     std::string dotfile = dirname + "/." + file;
 
     for (size_t i = 0; i < buffer_count; ++i) {
