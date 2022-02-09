@@ -109,14 +109,16 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 
     if (not null) {
 	outfile.open(dotfile.c_str(), std::ofstream::binary);
-        if (orig_path.has_extension()) {
-            if (orig_path.extension() == ".gz") {
-	        std::cout << "writing gzip compressed output" << std::endl;
-                outbuf.push(boost::iostreams::gzip_compressor(zlevel));
-            } else if (orig_path.extension() == ".zst") {
-                std::cout << "writing zstd compressed output" << std::endl;
-                outbuf.push(boost::iostreams::zstd_compressor(boost::iostreams::zstd_params(zlevel)));
-            }
+	if (orig_path.has_extension()) {
+	    if (orig_path.extension() == ".gz") {
+		std::cout << "writing gzip compressed output" << std::endl;
+		outbuf.push(boost::iostreams::gzip_compressor(
+		    boost::iostreams::gzip_params(zlevel)));
+	    } else if (orig_path.extension() == ".zst") {
+		std::cout << "writing zstd compressed output" << std::endl;
+		outbuf.push(boost::iostreams::zstd_compressor(
+		    boost::iostreams::zstd_params(zlevel)));
+	    }
 	}
 	outbuf.push(outfile);
     }
