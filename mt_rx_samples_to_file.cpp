@@ -101,7 +101,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     boost::filesystem::path orig_path(file);
     std::string basename(orig_path.filename().c_str());
     std::string dirname(boost::filesystem::canonical(orig_path.parent_path()).c_str());
-    std::string dotfile = dirname + "/." + file;
+    std::string dotfile = dirname + "/." + base;
 
     for (size_t i = 0; i < buffer_count; ++i) {
 	buffers[i].resize(max_buffer_size);
@@ -109,6 +109,9 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 
     if (not null) {
 	outfile.open(dotfile.c_str(), std::ofstream::binary);
+        if (!outfile.is_open()) {
+            throw std::runtime_error(dotfile + " could not be opened");
+        }
 	if (orig_path.has_extension()) {
 	    if (orig_path.extension() == ".gz") {
 		std::cout << "writing gzip compressed output" << std::endl;
