@@ -101,7 +101,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     boost::filesystem::path orig_path(file);
     std::string basename(orig_path.filename().c_str());
     std::string dirname(boost::filesystem::canonical(orig_path.parent_path()).c_str());
-    std::string dotfile = dirname + "/." + base;
+    std::string dotfile = dirname + "/." + basename;
 
     for (size_t i = 0; i < buffer_count; ++i) {
 	buffers[i].resize(max_buffer_size);
