@@ -214,6 +214,9 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     typedef std::map<size_t, size_t> SizeMap;
     SizeMap mapSizes;
     const auto start_time = std::chrono::steady_clock::now();
+
+    rx_stream->issue_stream_cmd(stream_cmd);
+
     const auto stop_time =
         start_time + std::chrono::milliseconds(int64_t(1000 * time_requested));
     // Track time and samps between updating the BW summary
@@ -227,7 +230,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     rx_stream->issue_stream_cmd(stream_cmd);
     for (; not stop_signal_called
            and (num_requested_samples != num_total_samps or num_requested_samples == 0)
-           and (time_requested == 0.0 or std::chrono::steady_clock::now() <= stop_time);) {
+           and (time_requested == 0.0 or std::chrono::steady_clock::now() < stop_time);) {
         const auto now = std::chrono::steady_clock::now();
         write_buffer_t *buffer_p = buffers + write_ptr;
         size_t num_rx_samps =
