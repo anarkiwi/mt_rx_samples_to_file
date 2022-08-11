@@ -52,13 +52,11 @@ static size_t calls = 0, total = 0;
 static int nfft = 0;
 static fftwf_complex *fbuf = NULL;
 static fftwf_plan plan;
-static size_t fft_p = 0;
 
 
 inline void write_samples()
 {
     write_buffer_t *buffer_p;
-    iqstruct_t *iq_p;
     size_t read_ptr;
     while (queue.pop(read_ptr)) {
         buffer_p = buffers + read_ptr;
@@ -66,14 +64,14 @@ inline void write_samples()
             out.write((const char*)buffer_p->data(), buffer_p->capacity());
             if (fbuf) {
                 iqstruct_t *i_p = (iqstruct_t*) buffer_p->data();
-                for (size_t i = 0; i < (buffer_p->capacity() / sizeof(iqstruct_t)); ++i, ++i_p) {
-                    fbuf[fft_p][0] = i_p->i;
-                    fbuf[fft_p][1] = i_p->q;
-                    if (++fft_p == nfft) {
-                        fft_p = 0;
-                        fftwf_execute(plan);
-                        fft_out.write((const char*)fbuf, nfft * sizeof(fftwf_complex));
+                size_t fft_buf_size = nfft * sizeof(fftwf_complex);
+                for (size_t i = 0; i < buffer_p->capacity() / fft_buf_size; ++i) {
+                    for (size_t fft_p = 0; fft_p < nfft; ++fft_p, ++i_p) {
+                        fbuf[fft_p][0] = i_p->i;
+                        fbuf[fft_p][1] = i_p->q;
                     }
+                    fftwf_execute(plan);
+                    fft_out.write((const char*)fbuf, fft_buf_size);
                 }
             }
         }
