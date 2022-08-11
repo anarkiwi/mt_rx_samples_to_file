@@ -56,10 +56,9 @@ static fftwf_plan plan;
 
 inline void write_samples()
 {
-    write_buffer_t *buffer_p;
     size_t read_ptr;
     while (queue.pop(read_ptr)) {
-        buffer_p = buffers + read_ptr;
+        write_buffer_t *buffer_p = buffers + read_ptr;
         if (!outbuf.empty()) {
             out.write((const char*)buffer_p->data(), buffer_p->capacity());
             if (fbuf) {
@@ -221,7 +220,6 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     auto last_update                     = start_time;
     unsigned long long last_update_samps = 0;
     size_t write_ptr = 0;
-    write_buffer_t *buffer_p;
 
     // Run this loop until either time expired (if a duration was given), until
     // the requested number of samples were collected (if such a number was
@@ -231,7 +229,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
            and (num_requested_samples != num_total_samps or num_requested_samples == 0)
            and (time_requested == 0.0 or std::chrono::steady_clock::now() <= stop_time);) {
         const auto now = std::chrono::steady_clock::now();
-        buffer_p = buffers + write_ptr;
+        write_buffer_t *buffer_p = buffers + write_ptr;
         size_t num_rx_samps =
             rx_stream->recv(buffer_p->data(), max_samples, md, 3.0, enable_size_map);
 
