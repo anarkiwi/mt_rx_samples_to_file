@@ -52,28 +52,25 @@ static size_t calls = 0, total = 0;
 static int nfft = 0;
 static fftwf_complex *fbuf = NULL;
 static fftwf_plan plan;
-static size_t fft_p = 0;
 
 
 inline void write_samples()
 {
-    write_buffer_t *buffer_p;
-    iqstruct_t *iq_p;
     size_t read_ptr;
     while (queue.pop(read_ptr)) {
-        buffer_p = buffers + read_ptr;
+        write_buffer_t *buffer_p = buffers + read_ptr;
         if (!outbuf.empty()) {
             out.write((const char*)buffer_p->data(), buffer_p->capacity());
             if (fbuf) {
                 iqstruct_t *i_p = (iqstruct_t*) buffer_p->data();
-                for (size_t i = 0; i < (buffer_p->capacity() / sizeof(iqstruct_t)); ++i, ++i_p) {
-                    fbuf[fft_p][0] = i_p->i;
-                    fbuf[fft_p][1] = i_p->q;
-                    if (++fft_p == nfft) {
-                        fft_p = 0;
-                        fftwf_execute(plan);
-                        fft_out.write((const char*)fbuf, nfft * sizeof(fftwf_complex));
+                size_t fft_buf_size = nfft * sizeof(fftwf_complex);
+                for (size_t i = 0; i < buffer_p->capacity() / fft_buf_size; ++i) {
+                    for (size_t fft_p = 0; fft_p < nfft; ++fft_p, ++i_p) {
+                        fbuf[fft_p][0] = i_p->i;
+                        fbuf[fft_p][1] = i_p->q;
                     }
+                    fftwf_execute(plan);
+                    fft_out.write((const char*)fbuf, fft_buf_size);
                 }
             }
         }
@@ -118,7 +115,7 @@ void open_samples(std::string &dotfile, boost::filesystem::path &orig_path, size
     outbuf_p->push(*outfile_p);
 }
 
-void close_samples(const std::string &file, std::string &dotfile, std::string &dirname, size_t overflows,
+void close_samples(const std::string &file, std::string &dotfile, const std::string &dirname, size_t overflows,
                    std::ofstream *outfile_p, boost::iostreams::filtering_streambuf<boost::iostreams::output> *outbuf_p) {
     if (outfile_p->is_open()) {
         std::cout << "closing " << file << std::endl;
@@ -159,11 +156,16 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     stream_args.channels             = channel_nums;
     uhd::rx_streamer::sptr rx_stream = usrp->get_rx_stream(stream_args);
 
+    if (samps_per_buff == 0) {
+        samps_per_buff = rate;
+        std::cout << "defaulting spb to rate (" << samps_per_buff << ")" << std::endl;
+    }
+
     const size_t max_samps_per_packet = rx_stream->get_max_num_samps();
     const size_t max_samples = std::max(max_samps_per_packet, samps_per_buff);
     std::cout << "max_samps_per_packet from stream: " << max_samps_per_packet << std::endl;
     static size_t max_buffer_size = max_samples * sizeof(samp_type);
-    std::cout << "max_buffer_size: " << max_buffer_size << std::endl;
+    std::cout << "max_buffer_size: " << max_buffer_size << " (" << max_samples << " samples)" << std::endl;
 
     uhd::rx_metadata_t md;
     std::ofstream outfile;
@@ -184,6 +186,11 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
         open_samples(dotfile, orig_path, zlevel, &outfile, &outbuf);
         if (nfft) {
             std::cout << "using FFT point size " << nfft << std::endl;
+
+            if (samps_per_buff % nfft) {
+                throw std::runtime_error("FFT point size must be a factor of spb");
+            }
+
             fbuf = fftwf_alloc_complex(nfft);
             plan = fftwf_plan_dft_1d(nfft, fbuf, fbuf, FFTW_FORWARD, FFTW_ESTIMATE);
             open_samples(fft_dotfile, orig_path, zlevel, &fft_outfile, &fft_outbuf);
@@ -207,13 +214,15 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     typedef std::map<size_t, size_t> SizeMap;
     SizeMap mapSizes;
     const auto start_time = std::chrono::steady_clock::now();
+
+    rx_stream->issue_stream_cmd(stream_cmd);
+
     const auto stop_time =
         start_time + std::chrono::milliseconds(int64_t(1000 * time_requested));
     // Track time and samps between updating the BW summary
     auto last_update                     = start_time;
     unsigned long long last_update_samps = 0;
     size_t write_ptr = 0;
-    write_buffer_t *buffer_p;
 
     // Run this loop until either time expired (if a duration was given), until
     // the requested number of samples were collected (if such a number was
@@ -221,9 +230,9 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     rx_stream->issue_stream_cmd(stream_cmd);
     for (; not stop_signal_called
            and (num_requested_samples != num_total_samps or num_requested_samples == 0)
-           and (time_requested == 0.0 or std::chrono::steady_clock::now() <= stop_time);) {
+           and (time_requested == 0.0 or std::chrono::steady_clock::now() < stop_time);) {
         const auto now = std::chrono::steady_clock::now();
-        buffer_p = buffers + write_ptr;
+        write_buffer_t *buffer_p = buffers + write_ptr;
         size_t num_rx_samps =
             rx_stream->recv(buffer_p->data(), max_samples, md, 3.0, enable_size_map);
 
@@ -264,11 +273,11 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
             buffer_p->resize(samp_bytes);
             buffer_p->shrink_to_fit();
             if (samp_bytes != buffer_p->capacity()) {
-                std::cout << "bad!" << std::endl;
+                std::cout << "resize failed, got capacity " << buffer_p->capacity() << std::endl;
             }
         }
         if (!queue.push(write_ptr)) {
-            std::cout << "queue failed" << std::endl;
+            std::cout << "sample buffer queue failed (overflow)" << std::endl;
         }
         if (++write_ptr == buffer_count) {
             write_ptr = 0;
@@ -390,15 +399,15 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     desc.add_options()
         ("help", "help message")
         ("args", po::value<std::string>(&args)->default_value(""), "multi uhd device address args")
-        ("file", po::value<std::string>(&file)->default_value("usrp_samples.dat"), "name of the file to write binary samples to")
+        ("file", po::value<std::string>(&file)->default_value("usrp_samples.dat.zst"), "name of the file to write binary samples to")
         ("type", po::value<std::string>(&type)->default_value("short"), "sample type: double, float, or short")
         ("nsamps", po::value<size_t>(&total_num_samps)->default_value(0), "total number of samples to receive")
         ("duration", po::value<double>(&total_time)->default_value(0), "total number of seconds to receive")
         ("time", po::value<double>(&total_time), "(DEPRECATED) will go away soon! Use --duration instead")
         ("zlevel", po::value<size_t>(&zlevel)->default_value(1), "default compression level")
-        ("spb", po::value<size_t>(&spb)->default_value(8192), "samples per buffer")
-        ("rate", po::value<double>(&rate)->default_value(1e6 * (1024*1024)), "rate of incoming samples")
-        ("freq", po::value<double>(&freq)->default_value(0.0), "RF center frequency in Hz")
+        ("spb", po::value<size_t>(&spb)->default_value(0), "samples per buffer (if 0, same as rate)")
+        ("rate", po::value<double>(&rate)->default_value(20 * (1024*1024)), "rate of incoming samples")
+        ("freq", po::value<double>(&freq)->default_value(100e6), "RF center frequency in Hz")
         ("lo-offset", po::value<double>(&lo_offset)->default_value(0.0),
             "Offset for frontend LO in Hz (optional)")
         ("gain", po::value<double>(&gain), "gain for the RF chain")
@@ -416,7 +425,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         ("continue", "don't abort on a bad packet")
         ("skip-lo", "skip checking LO lock status")
         ("int-n", "tune USRP with integer-N tuning")
-        ("nfft", po::value<int>(&nfft)->default_value(2048), "FFT points")
+        ("nfft", po::value<int>(&nfft)->default_value(0), "if > 0, calculate N FFT points")
     ;
     // clang-format on
     po::variables_map vm;
@@ -442,6 +451,11 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     if (enable_size_map)
         std::cout << "Packet size tracking enabled - will only recv one packet at a time!"
                   << std::endl;
+
+    if (nfft && type != "short") {
+        std::cout << "FFT mode only supported when sample type short" << std::endl;
+        return -0;
+    }
 
     // create a usrp device
     std::cout << std::endl;
