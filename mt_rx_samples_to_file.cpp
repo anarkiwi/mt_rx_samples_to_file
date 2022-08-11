@@ -425,7 +425,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         ("continue", "don't abort on a bad packet")
         ("skip-lo", "skip checking LO lock status")
         ("int-n", "tune USRP with integer-N tuning")
-        ("nfft", po::value<int>(&nfft)->default_value(2048), "if > 0, calculate N FFT points")
+        ("nfft", po::value<int>(&nfft)->default_value(0), "if > 0, calculate N FFT points")
     ;
     // clang-format on
     po::variables_map vm;
