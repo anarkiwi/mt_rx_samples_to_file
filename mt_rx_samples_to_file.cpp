@@ -449,6 +449,11 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         std::cout << "Packet size tracking enabled - will only recv one packet at a time!"
                   << std::endl;
 
+    if (nfft && type != "short") {
+        std::cout << "FFT mode only supported when sample type short" << std::endl;
+        return -0;
+    }
+
     // create a usrp device
     std::cout << std::endl;
     std::cout << boost::format("Creating the usrp device with: %s...") % args
