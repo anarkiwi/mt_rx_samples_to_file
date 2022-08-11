@@ -115,7 +115,7 @@ void open_samples(std::string &dotfile, boost::filesystem::path &orig_path, size
     outbuf_p->push(*outfile_p);
 }
 
-void close_samples(const std::string &file, std::string &dotfile, std::string &dirname, size_t overflows,
+void close_samples(const std::string &file, std::string &dotfile, const std::string &dirname, size_t overflows,
                    std::ofstream *outfile_p, boost::iostreams::filtering_streambuf<boost::iostreams::output> *outbuf_p) {
     if (outfile_p->is_open()) {
         std::cout << "closing " << file << std::endl;
