@@ -159,11 +159,16 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     stream_args.channels             = channel_nums;
     uhd::rx_streamer::sptr rx_stream = usrp->get_rx_stream(stream_args);
 
+    if (samps_per_buff == 0) {
+        samps_per_buff = rate;
+        std::cout << "defaulting spb to rate (" << samps_per_buff << ")" << std::endl;
+    }
+
     const size_t max_samps_per_packet = rx_stream->get_max_num_samps();
     const size_t max_samples = std::max(max_samps_per_packet, samps_per_buff);
     std::cout << "max_samps_per_packet from stream: " << max_samps_per_packet << std::endl;
     static size_t max_buffer_size = max_samples * sizeof(samp_type);
-    std::cout << "max_buffer_size: " << max_buffer_size << std::endl;
+    std::cout << "max_buffer_size: " << max_buffer_size << " (" << max_samples << " samples)" << std::endl;
 
     uhd::rx_metadata_t md;
     std::ofstream outfile;
@@ -184,6 +189,11 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
         open_samples(dotfile, orig_path, zlevel, &outfile, &outbuf);
         if (nfft) {
             std::cout << "using FFT point size " << nfft << std::endl;
+
+            if (samps_per_buff % nfft) {
+                throw std::runtime_error("FFT point size must be a factor of spb");
+            }
+
             fbuf = fftwf_alloc_complex(nfft);
             plan = fftwf_plan_dft_1d(nfft, fbuf, fbuf, FFTW_FORWARD, FFTW_ESTIMATE);
             open_samples(fft_dotfile, orig_path, zlevel, &fft_outfile, &fft_outbuf);
@@ -264,11 +274,11 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
             buffer_p->resize(samp_bytes);
             buffer_p->shrink_to_fit();
             if (samp_bytes != buffer_p->capacity()) {
-                std::cout << "bad!" << std::endl;
+                std::cout << "resize failed, got capacity " << buffer_p->capacity() << std::endl;
             }
         }
         if (!queue.push(write_ptr)) {
-            std::cout << "queue failed" << std::endl;
+            std::cout << "sample buffer queue failed (overflow)" << std::endl;
         }
         if (++write_ptr == buffer_count) {
             write_ptr = 0;
@@ -390,15 +400,15 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     desc.add_options()
         ("help", "help message")
         ("args", po::value<std::string>(&args)->default_value(""), "multi uhd device address args")
-        ("file", po::value<std::string>(&file)->default_value("usrp_samples.dat"), "name of the file to write binary samples to")
+        ("file", po::value<std::string>(&file)->default_value("usrp_samples.dat.zst"), "name of the file to write binary samples to")
         ("type", po::value<std::string>(&type)->default_value("short"), "sample type: double, float, or short")
         ("nsamps", po::value<size_t>(&total_num_samps)->default_value(0), "total number of samples to receive")
         ("duration", po::value<double>(&total_time)->default_value(0), "total number of seconds to receive")
         ("time", po::value<double>(&total_time), "(DEPRECATED) will go away soon! Use --duration instead")
         ("zlevel", po::value<size_t>(&zlevel)->default_value(1), "default compression level")
-        ("spb", po::value<size_t>(&spb)->default_value(8192), "samples per buffer")
-        ("rate", po::value<double>(&rate)->default_value(1e6 * (1024*1024)), "rate of incoming samples")
-        ("freq", po::value<double>(&freq)->default_value(0.0), "RF center frequency in Hz")
+        ("spb", po::value<size_t>(&spb)->default_value(0), "samples per buffer (if 0, same as rate)")
+        ("rate", po::value<double>(&rate)->default_value(20 * (1024*1024)), "rate of incoming samples")
+        ("freq", po::value<double>(&freq)->default_value(100e6), "RF center frequency in Hz")
         ("lo-offset", po::value<double>(&lo_offset)->default_value(0.0),
             "Offset for frontend LO in Hz (optional)")
         ("gain", po::value<double>(&gain), "gain for the RF chain")
@@ -416,7 +426,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         ("continue", "don't abort on a bad packet")
         ("skip-lo", "skip checking LO lock status")
         ("int-n", "tune USRP with integer-N tuning")
-        ("nfft", po::value<int>(&nfft)->default_value(2048), "FFT points")
+        ("nfft", po::value<int>(&nfft)->default_value(2048), "if > 0, calculate N FFT points")
     ;
     // clang-format on
     po::variables_map vm;
