@@ -64,7 +64,7 @@ inline void write_samples()
             if (fbuf) {
                 iqstruct_t *i_p = (iqstruct_t*) buffer_p->data();
                 size_t fft_buf_size = nfft * sizeof(fftwf_complex);
-                for (size_t i = 0; i < buffer_p->capacity() / fft_buf_size; ++i) {
+                for (size_t i = 0; i < buffer_p->capacity() / (nfft * sizeof(iqstruct)); ++i) {
                     for (size_t fft_p = 0; fft_p < nfft; ++fft_p, ++i_p) {
                         fbuf[fft_p][0] = i_p->i;
                         fbuf[fft_p][1] = i_p->q;
