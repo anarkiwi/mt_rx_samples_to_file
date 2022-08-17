@@ -7,6 +7,7 @@ jobs:
     - uses: actions/checkout@v3
     - name: test
       run: |
-        sudo apt-get update && sudo apt-get install -qy build-essential cmake libuhd-dev libboost-all-dev cppcheck && \
+        sudo apt-get update && sudo apt-get install -qy build-essential cmake libuhd-dev libboost-all-dev cppcheck libarmadillo-dev unzip wget && \
+        wget https://sourceforge.net/projects/sigpack/files/sigpack-1.2.7.zip -O sigpack.zip && unzip sigpack.zip && ln -s sigpack-*/sigpack . && \
         cppcheck *cpp &&
         mkdir build && cd build && cmake .. && make
