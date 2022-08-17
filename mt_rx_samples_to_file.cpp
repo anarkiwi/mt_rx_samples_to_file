@@ -29,6 +29,8 @@
 #include <iostream>
 #include <thread>
 
+#include "sigpack/sigpack.h"
+
 namespace po = boost::program_options;
 
 // TODO: support non s16
