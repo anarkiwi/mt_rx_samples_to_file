@@ -20,7 +20,6 @@
 #include <boost/thread/thread.hpp>
 #include <boost/atomic.hpp>
 #include <boost/lockfree/spsc_queue.hpp>
-#include <fftw3.h>
 #include <cstdio>
 #include <chrono>
 #include <complex>
@@ -52,27 +51,26 @@ boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<buffer_count>> que
 static size_t calls = 0, total = 0;
 
 static int nfft = 0;
-static fftwf_complex *fbuf = NULL;
-static fftwf_plan plan;
 
 
 inline void write_samples()
 {
     size_t read_ptr;
+    arma::cx_fvec psd_in(nfft);
+
     while (queue.pop(read_ptr)) {
         write_buffer_t *buffer_p = buffers + read_ptr;
         if (!outbuf.empty()) {
             out.write((const char*)buffer_p->data(), buffer_p->capacity());
-            if (fbuf) {
+            if (nfft) {
                 iqstruct_t *i_p = (iqstruct_t*) buffer_p->data();
-                size_t fft_buf_size = nfft * sizeof(fftwf_complex);
+                size_t psd_buf_size = nfft * sizeof(float);
                 for (size_t i = 0; i < buffer_p->capacity() / (nfft * sizeof(iqstruct)); ++i) {
                     for (size_t fft_p = 0; fft_p < nfft; ++fft_p, ++i_p) {
-                        fbuf[fft_p][0] = i_p->i;
-                        fbuf[fft_p][1] = i_p->q;
+                        psd_in[fft_p] = std::complex(i_p->i, i_p->q);
                     }
-                    fftwf_execute(plan);
-                    fft_out.write((const char*)fbuf, fft_buf_size);
+                    arma::fvec psd_out = arma::conv_to<arma::fvec>::from(sp::pwelch(psd_in, nfft, 0));
+                    fft_out.write((const char*)psd_out.memptr(), psd_buf_size);
                 }
             }
         }
@@ -193,8 +191,6 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
                 throw std::runtime_error("FFT point size must be a factor of spb");
             }
 
-            fbuf = fftwf_alloc_complex(nfft);
-            plan = fftwf_plan_dft_1d(nfft, fbuf, fbuf, FFTW_FORWARD, FFTW_ESTIMATE);
             open_samples(fft_dotfile, orig_path, zlevel, &fft_outfile, &fft_outbuf);
         }
     }
@@ -229,7 +225,6 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     // Run this loop until either time expired (if a duration was given), until
     // the requested number of samples were collected (if such a number was
     // given), or until Ctrl-C was pressed.
-    rx_stream->issue_stream_cmd(stream_cmd);
     for (; not stop_signal_called
            and (num_requested_samples != num_total_samps or num_requested_samples == 0)
            and (time_requested == 0.0 or std::chrono::steady_clock::now() < stop_time);) {
@@ -319,7 +314,6 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 
     if (nfft) {
         close_samples(fft_file, fft_dotfile, dirname, overflows, &fft_outfile, &fft_outbuf);
-        fftwf_free(fbuf);
     }
 
     std::cout << "closed" << std::endl;
@@ -427,7 +421,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         ("continue", "don't abort on a bad packet")
         ("skip-lo", "skip checking LO lock status")
         ("int-n", "tune USRP with integer-N tuning")
-        ("nfft", po::value<int>(&nfft)->default_value(0), "if > 0, calculate N FFT points")
+        ("nfft", po::value<int>(&nfft)->default_value(0), "if > 0, calculate PSD over N FFT points")
     ;
     // clang-format on
     po::variables_map vm;
