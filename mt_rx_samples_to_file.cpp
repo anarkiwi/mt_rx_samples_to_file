@@ -67,7 +67,7 @@ inline void write_samples()
                 size_t psd_buf_size = nfft * sizeof(float);
                 for (size_t i = 0; i < buffer_p->capacity() / (nfft * sizeof(iqstruct)); ++i) {
                     for (size_t fft_p = 0; fft_p < nfft; ++fft_p, ++i_p) {
-                        psd_in[fft_p] = std::complex(i_p->i, i_p->q);
+                        psd_in[fft_p] = std::complex<float>(i_p->i, i_p->q);
                     }
                     arma::fvec psd_out = arma::conv_to<arma::fvec>::from(sp::pwelch(psd_in, nfft, 0));
                     fft_out.write((const char*)psd_out.memptr(), psd_buf_size);
