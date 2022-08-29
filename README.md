@@ -29,6 +29,7 @@ $ python3
 >>> NFFT=2048
 >>> i = np.fromfile('fft_recording_1_108000000Hz_1024000sps.s16', dtype=np.float32)
 >>> i = np.roll(i.reshape(-1, NFFT).swapaxes(0, 1), int(NFFT / 2), 0)
+>>> i = np.log10(i) * 10
 >>> plt.imshow(i, cmap='turbo')
 >>> plt.show()
 ```
