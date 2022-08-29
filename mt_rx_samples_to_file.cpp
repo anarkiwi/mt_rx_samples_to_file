@@ -48,15 +48,13 @@ static std::ostream fft_out(&fft_outbuf);
 static write_buffer_t buffers[buffer_count];
 static boost::atomic<bool> writer_done(false);
 boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<buffer_count>> queue;
-static size_t calls = 0, total = 0;
-
-static int nfft = 0;
+static size_t calls = 0, total = 0, nfft = 0, nfft_div = 0, rate = 0;
 
 
 inline void write_samples()
 {
     size_t read_ptr;
-    arma::cx_fvec psd_in(nfft);
+    arma::cx_fvec psd_in(rate / nfft_div);
 
     while (queue.pop(read_ptr)) {
         write_buffer_t *buffer_p = buffers + read_ptr;
@@ -65,8 +63,8 @@ inline void write_samples()
             if (nfft) {
                 iqstruct_t *i_p = (iqstruct_t*) buffer_p->data();
                 size_t psd_buf_size = nfft * sizeof(float);
-                for (size_t i = 0; i < buffer_p->capacity() / (nfft * sizeof(iqstruct)); ++i) {
-                    for (size_t fft_p = 0; fft_p < nfft; ++fft_p, ++i_p) {
+                for (size_t i = 0; i < buffer_p->capacity() / (psd_in.size() * sizeof(iqstruct)); ++i) {
+                    for (size_t fft_p = 0; fft_p < psd_in.size(); ++fft_p, ++i_p) {
                         psd_in[fft_p] = std::complex<float>(i_p->i, i_p->q);
                     }
                     arma::fvec psd_out = arma::conv_to<arma::fvec>::from(sp::pwelch(psd_in, nfft, 0));
@@ -139,7 +137,6 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     const std::string& file,
     size_t samps_per_buff,
     size_t zlevel,
-    double rate,
     unsigned long long num_requested_samples,
     double time_requested       = 0.0,
     bool bw_summary             = false,
@@ -189,6 +186,10 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 
             if (samps_per_buff % nfft) {
                 throw std::runtime_error("FFT point size must be a factor of spb");
+            }
+
+            if (rate % nfft_div) {
+                throw std::runtime_error("nfft_div must be a factor of sample rate");
             }
 
             open_samples(fft_dotfile, orig_path, zlevel, &fft_outfile, &fft_outbuf);
@@ -293,8 +294,8 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
             if (time_since_last_update > std::chrono::seconds(1)) {
                 const double time_since_last_update_s =
                     std::chrono::duration<double>(time_since_last_update).count();
-                const double rate = double(last_update_samps) / time_since_last_update_s;
-                std::cout << "\t" << (rate / 1e6) << " Msps" << std::endl;
+                const double time_rate = (double)last_update_samps / time_since_last_update_s / 1e6;
+                std::cout << "\t" << time_rate << " Msps" << std::endl;
                 last_update_samps = 0;
                 last_update       = now;
             }
@@ -326,8 +327,8 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
         std::cout << boost::format("Received %d samples in %f seconds") % num_total_samps
                          % actual_duration_seconds
                   << std::endl;
-        const double rate = (double)num_total_samps / actual_duration_seconds;
-        std::cout << (rate / 1e6) << " Msps" << std::endl;
+        const double time_rate = (double)num_total_samps / actual_duration_seconds / 1e6;
+        std::cout << time_rate << " Msps" << std::endl;
 
         if (enable_size_map) {
             std::cout << std::endl;
@@ -387,7 +388,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     // variables to be set by po
     std::string args, file, type, ant, subdev, ref, wirefmt;
     size_t channel, total_num_samps, spb, zlevel;
-    double rate, freq, gain, bw, total_time, setup_time, lo_offset;
+    double option_rate, freq, gain, bw, total_time, setup_time, lo_offset;
 
     // setup the program options
     po::options_description desc("Allowed options");
@@ -402,7 +403,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         ("time", po::value<double>(&total_time), "(DEPRECATED) will go away soon! Use --duration instead")
         ("zlevel", po::value<size_t>(&zlevel)->default_value(1), "default compression level")
         ("spb", po::value<size_t>(&spb)->default_value(0), "samples per buffer (if 0, same as rate)")
-        ("rate", po::value<double>(&rate)->default_value(20 * (1024*1024)), "rate of incoming samples")
+        ("rate", po::value<double>(&option_rate)->default_value(20 * (1024*1024)), "rate of incoming samples")
         ("freq", po::value<double>(&freq)->default_value(100e6), "RF center frequency in Hz")
         ("lo-offset", po::value<double>(&lo_offset)->default_value(0.0),
             "Offset for frontend LO in Hz (optional)")
@@ -421,7 +422,8 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         ("continue", "don't abort on a bad packet")
         ("skip-lo", "skip checking LO lock status")
         ("int-n", "tune USRP with integer-N tuning")
-        ("nfft", po::value<int>(&nfft)->default_value(0), "if > 0, calculate PSD over N FFT points")
+        ("nfft", po::value<size_t>(&nfft)->default_value(0), "if > 0, calculate PSD over N FFT points")
+        ("nfft_div", po::value<size_t>(&nfft_div)->default_value(50), "calculate PSD over sample rate / n samples (e.g 50 == 20ms)")
     ;
     // clang-format on
     po::variables_map vm;
@@ -471,10 +473,12 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     std::cout << boost::format("Using Device: %s") % usrp->get_pp_string() << std::endl;
 
     // set the sample rate
-    if (rate <= 0.0) {
+    if (option_rate <= 0.0) {
         std::cerr << "Please specify a valid sample rate" << std::endl;
         return ~0;
     }
+
+    rate = size_t(option_rate);
     std::cout << boost::format("Setting RX Rate: %f Msps...") % (rate / 1e6) << std::endl;
     usrp->set_rx_rate(rate, channel);
     std::cout << boost::format("Actual RX Rate: %f Msps...")
@@ -564,7 +568,6 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         file,                     \
         spb,                      \
         zlevel,                   \
-        rate,                     \
         total_num_samps,          \
         total_time,               \
         bw_summary,               \
