@@ -32,13 +32,6 @@
 
 namespace po = boost::program_options;
 
-// TODO: support non s16
-struct iqstruct {
-  int16_t i;
-  int16_t q;
-};
-typedef iqstruct iqstruct_t;
-
 const size_t buffer_count = 16;
 typedef std::vector<char> write_buffer_t;
 static boost::iostreams::filtering_streambuf<boost::iostreams::output> outbuf;
@@ -50,6 +43,7 @@ static boost::atomic<bool> writer_done(false);
 boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<buffer_count>> queue;
 static size_t calls = 0, total = 0, nfft = 0, nfft_div = 0, rate = 0;
 
+typedef std::complex<int16_t> sample_t;
 
 inline void write_samples()
 {
@@ -61,13 +55,13 @@ inline void write_samples()
         if (!outbuf.empty()) {
             out.write((const char*)buffer_p->data(), buffer_p->capacity());
             if (nfft) {
-                iqstruct_t *i_p = (iqstruct_t*) buffer_p->data();
+                sample_t *i_p = (sample_t*) buffer_p->data();
                 size_t psd_buf_size = nfft * sizeof(float);
-                for (size_t i = 0; i < buffer_p->capacity() / (psd_in.size() * sizeof(iqstruct)); ++i) {
+                for (size_t i = 0; i < buffer_p->capacity() / (psd_in.size() * sizeof(sample_t)); ++i) {
                     for (size_t fft_p = 0; fft_p < psd_in.size(); ++fft_p, ++i_p) {
-                        psd_in[fft_p] = std::complex<float>(i_p->i, i_p->q);
+                        psd_in[fft_p] = std::complex<float>(i_p->real(), i_p->imag());
                     }
-                    arma::fvec psd_out = arma::conv_to<arma::fvec>::from(sp::pwelch(psd_in, nfft, 0));
+                    arma::fvec psd_out = log(arma::conv_to<arma::fvec>::from(sp::pwelch(psd_in, nfft, 0))) * 10;
                     fft_out.write((const char*)psd_out.memptr(), psd_buf_size);
                 }
             }
