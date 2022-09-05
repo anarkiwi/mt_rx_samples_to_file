@@ -44,7 +44,7 @@ static char* buffers[buffer_count];
 static size_t buffers_capacity[buffer_count];
 static boost::atomic<bool> writer_done(false);
 boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<buffer_count>> queue;
-static size_t calls = 0, total = 0, nfft = 0, nfft_div = 0, rate = 0, batches = 0, sample_id = 0;
+static size_t calls = 0, total = 0, nfft = 0, nfft_overlap = 0, nfft_div = 0, rate = 0, batches = 0, sample_id = 0;
 
 typedef std::complex<int16_t> sample_t;
 
@@ -232,7 +232,7 @@ inline void write_samples()
                 for (size_t fft_p = 0; fft_p < psd_in.size(); ++fft_p, ++i_p) {
                     psd_in[fft_p] = std::complex<float>(i_p->real(), i_p->imag());
                 }
-                arma::fmat psd_out = log10(specgram(psd_in, nfft, nfft/2)) * 10;
+                arma::fmat psd_out = log10(specgram(psd_in, nfft, nfft_overlap)) * 10;
                 if (!fft_outbuf.empty()) {
                     fft_out.write((const char*)psd_out.memptr(), psd_out.n_elem * sizeof(float));
                 }
@@ -595,8 +595,9 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         ("continue", "don't abort on a bad packet")
         ("skip-lo", "skip checking LO lock status")
         ("int-n", "tune USRP with integer-N tuning")
-        ("nfft", po::value<size_t>(&nfft)->default_value(0), "if > 0, calculate PSD over N FFT points")
-        ("nfft_div", po::value<size_t>(&nfft_div)->default_value(50), "calculate PSD over sample rate / n samples (e.g 50 == 20ms)")
+        ("nfft", po::value<size_t>(&nfft)->default_value(0), "if > 0, calculate n FFT points")
+        ("nfft_overlap", po::value<size_t>(&nfft_overlap)->default_value(0), "FFT overlap")
+        ("nfft_div", po::value<size_t>(&nfft_div)->default_value(50), "calculate FFT over sample rate / n samples (e.g 50 == 20ms)")
         ("vkfft_batches", po::value<size_t>(&batches)->default_value(100), "vkFFT batches")
         ("vkfft_sample_id", po::value<size_t>(&sample_id)->default_value(0), "vkFFT sample_id")
     ;
