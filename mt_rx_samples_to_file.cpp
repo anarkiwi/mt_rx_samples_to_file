@@ -21,6 +21,7 @@
 #include <boost/atomic.hpp>
 #include <boost/lockfree/spsc_queue.hpp>
 #include <cstdio>
+#include <cstdlib>
 #include <chrono>
 #include <complex>
 #include <csignal>
