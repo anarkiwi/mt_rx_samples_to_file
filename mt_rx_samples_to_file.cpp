@@ -29,6 +29,9 @@
 #include <thread>
 
 #include "sigpack/sigpack.h"
+#include "vkFFT.h"
+#include "utils_VkFFT.h"
+#include "ShaderLang.h"
 
 namespace po = boost::program_options;
 
@@ -41,9 +44,174 @@ static std::ostream fft_out(&fft_outbuf);
 static write_buffer_t buffers[buffer_count];
 static boost::atomic<bool> writer_done(false);
 boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<buffer_count>> queue;
-static size_t calls = 0, total = 0, nfft = 0, nfft_div = 0, rate = 0;
+static size_t calls = 0, total = 0, nfft = 0, nfft_div = 0, rate = 0, batches = 0, sample_id = 0;
 
 typedef std::complex<int16_t> sample_t;
+
+
+static VkGPU vkGPUinst = {};
+static VkGPU *vkGPU = &vkGPUinst;
+static VkFFTConfiguration configurationInst = {};
+static VkFFTConfiguration *configuration = &configurationInst;
+static uint64_t numBuf = 0;
+static uint64_t* bufferSize = NULL;
+static VkBuffer* buffer = NULL;
+static VkDeviceMemory* bufferDeviceMemory = NULL;
+static VkFFTApplication app = {};
+static VkFFTLaunchParams launchParams = {};
+
+
+VkFFTResult init_vkfft() {
+    vkGPU->enableValidationLayers = 0;
+
+    VkResult res = VK_SUCCESS;
+    res = createInstance(vkGPU, sample_id);
+    if (res) {
+        std::cout << "VKFFT_ERROR_FAILED_TO_CREATE_INSTANCE" << std::endl;
+        return VKFFT_ERROR_FAILED_TO_CREATE_INSTANCE;
+    }
+    res = setupDebugMessenger(vkGPU);
+    if (res != 0) {
+	//printf("Debug messenger creation failed, error code: %" PRIu64 "\n", res);
+	return VKFFT_ERROR_FAILED_TO_SETUP_DEBUG_MESSENGER;
+    }
+    res = findPhysicalDevice(vkGPU);
+    if (res != 0) {
+	//printf("Physical device not found, error code: %" PRIu64 "\n", res);
+	return VKFFT_ERROR_FAILED_TO_FIND_PHYSICAL_DEVICE;
+    }
+    res = createDevice(vkGPU, sample_id);
+    if (res != 0) {
+	//printf("Device creation failed, error code: %" PRIu64 "\n", res);
+	return VKFFT_ERROR_FAILED_TO_CREATE_DEVICE;
+    }
+    res = createFence(vkGPU);
+    if (res != 0) {
+	//printf("Fence creation failed, error code: %" PRIu64 "\n", res);
+	return VKFFT_ERROR_FAILED_TO_CREATE_FENCE;
+    }
+    res = createCommandPool(vkGPU);
+    if (res != 0) {
+	//printf("Fence creation failed, error code: %" PRIu64 "\n", res);
+	return VKFFT_ERROR_FAILED_TO_CREATE_COMMAND_POOL;
+    }
+    vkGetPhysicalDeviceProperties(vkGPU->physicalDevice, &vkGPU->physicalDeviceProperties);
+    vkGetPhysicalDeviceMemoryProperties(vkGPU->physicalDevice, &vkGPU->physicalDeviceMemoryProperties);
+
+    glslang_initialize_process();//compiler can be initialized before VkFFT
+
+    configuration->FFTdim = 1;
+    configuration->size[0] = nfft;
+    configuration->size[1] = 1;
+    configuration->size[2] = 1;
+    configuration->device = &vkGPU->device;
+    configuration->queue = &vkGPU->queue;
+    configuration->fence = &vkGPU->fence;
+    configuration->commandPool = &vkGPU->commandPool;
+    configuration->physicalDevice = &vkGPU->physicalDevice;
+    configuration->isCompilerInitialized = true;
+    configuration->doublePrecision = false;
+    configuration->numberBatches = batches;
+
+    std::cout << "using vkFFT batch size " << configuration->numberBatches << " on " << vkGPU->physicalDeviceProperties.deviceName << std::endl;
+
+    numBuf = 1;
+    bufferSize = (uint64_t*)malloc(sizeof(uint64_t) * numBuf);
+    if (!bufferSize) return VKFFT_ERROR_MALLOC_FAILED;
+
+    for (uint64_t i = 0; i < numBuf; ++i) {
+        bufferSize[i] = {};
+	bufferSize[i] = (uint64_t)sizeof(std::complex<float>) * configuration->size[0] * configuration->numberBatches / numBuf;
+    }
+
+    configuration->bufferNum = numBuf;
+    configuration->bufferSize = bufferSize;
+
+    buffer = (VkBuffer*)malloc(numBuf * sizeof(VkBuffer));
+    if (!buffer) return VKFFT_ERROR_MALLOC_FAILED;
+    VkDeviceMemory* bufferDeviceMemory = (VkDeviceMemory*)malloc(numBuf * sizeof(VkDeviceMemory));
+    if (!bufferDeviceMemory) return VKFFT_ERROR_MALLOC_FAILED;
+
+    VkFFTResult resFFT = VKFFT_SUCCESS;
+
+    for (uint64_t i = 0; i < numBuf; ++i) {
+        buffer[i] = {};
+	bufferDeviceMemory[i] = {};
+	resFFT = allocateBuffer(vkGPU, &buffer[i], &bufferDeviceMemory[i], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_HEAP_DEVICE_LOCAL_BIT, bufferSize[i]);
+	if (resFFT != VKFFT_SUCCESS) return VKFFT_ERROR_MALLOC_FAILED;
+    }
+
+    configuration->buffer = buffer;
+    launchParams.buffer = buffer;
+
+    resFFT = initializeVkFFT(&app, *configuration);
+    if (resFFT != VKFFT_SUCCESS) return resFFT;
+
+    return VKFFT_SUCCESS;
+}
+
+
+template <class T1>
+arma::cx_fmat specgram_cx(const arma::Col<T1>& x, const arma::uword Nfft=512, const arma::uword Noverl=256)
+{
+        arma::cx_fmat Pw;
+
+        //Def params
+        arma::uword N = x.size();
+        arma::uword D = Nfft-Noverl;
+        arma::uword m = 0;
+        if(N > Nfft)
+        {
+            arma::Col<T1> xk(Nfft);
+            const arma::fvec W = arma::conv_to<arma::fvec>::from(sp::hamming(Nfft));
+            const float wc = sum(W);
+            const arma::uword U = static_cast<arma::uword>(floor((N-Noverl)/double(D)));
+            Pw.set_size(Nfft,U);
+            Pw.zeros();
+            arma::cx_fmat Pw_in(Nfft,U);
+            arma::cx_fvec Pxx(Nfft*U);
+
+            for(arma::uword k=0; k<=N-Nfft; k+=D)
+            {
+                Pw_in.col(m++) = x.rows(k,k+Nfft-1) % W;
+            }
+
+            size_t row_size = Nfft * sizeof(T1);
+            for(arma::uword k=0; k < Pw_in.n_cols; k += configuration->numberBatches)
+            {
+                size_t offset = k * row_size;
+                // TODO: Handle last/uneven batch size - should really retain overlap buffer from previous spectrum() call.
+                uint64_t buffer_size = std::min(bufferSize[0], (uint64_t)((Pw_in.n_cols - k) * row_size));
+                transferDataFromCPU(vkGPU, ((char*)Pw_in.memptr()) + offset, &buffer[0], buffer_size);
+                performVulkanFFT(vkGPU, &app, &launchParams, -1, 1);
+                transferDataToCPU(vkGPU, ((char*)Pw.memptr()) + offset, &buffer[0], buffer_size);
+            }
+
+            Pw /= wc;
+        }
+        return Pw;
+}
+
+
+template <class T1>
+arma::fmat specgram(const arma::Col<T1>& x, const arma::uword Nfft=512, const arma::uword Noverl=256)
+{
+    arma::cx_fmat Pw;
+    arma::fmat Sg;
+    Pw = specgram_cx(x,Nfft,Noverl);
+    Sg = real(Pw % conj(Pw));              // Calculate power spectrum
+    return Sg;
+}
+
+
+template <class T1>
+arma::fvec pwelch(const arma::Col<T1>& x, const arma::uword Nfft=512, const arma::uword Noverl=256)
+{
+    arma::fmat Pxx;
+    Pxx = specgram(x,Nfft,Noverl);
+    return arma::mean(Pxx,1);
+}
+
 
 inline void write_samples()
 {
@@ -54,15 +222,16 @@ inline void write_samples()
         write_buffer_t *buffer_p = buffers + read_ptr;
         if (!outbuf.empty()) {
             out.write((const char*)buffer_p->data(), buffer_p->capacity());
-            if (nfft) {
-                sample_t *i_p = (sample_t*) buffer_p->data();
-                size_t psd_buf_size = nfft * sizeof(float);
-                for (size_t i = 0; i < buffer_p->capacity() / (psd_in.size() * sizeof(sample_t)); ++i) {
-                    for (size_t fft_p = 0; fft_p < psd_in.size(); ++fft_p, ++i_p) {
-                        psd_in[fft_p] = std::complex<float>(i_p->real(), i_p->imag());
-                    }
-                    arma::fvec psd_out = log(arma::conv_to<arma::fvec>::from(sp::pwelch(psd_in, nfft, 0))) * 10;
-                    fft_out.write((const char*)psd_out.memptr(), psd_buf_size);
+        }
+        if (nfft) {
+            sample_t *i_p = (sample_t*) buffer_p->data();
+            for (size_t i = 0; i < buffer_p->capacity() / (psd_in.size() * sizeof(sample_t)); ++i) {
+                for (size_t fft_p = 0; fft_p < psd_in.size(); ++fft_p, ++i_p) {
+                    psd_in[fft_p] = std::complex<float>(i_p->real(), i_p->imag());
+                }
+                arma::fmat psd_out = log10(specgram(psd_in, nfft, nfft/2)) * 10;
+                if (!fft_outbuf.empty()) {
+                    fft_out.write((const char*)psd_out.memptr(), psd_out.n_elem * sizeof(float));
                 }
             }
         }
@@ -175,17 +344,20 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 
     if (not null) {
         open_samples(dotfile, orig_path, zlevel, &outfile, &outbuf);
-        if (nfft) {
-            std::cout << "using FFT point size " << nfft << std::endl;
+    }
 
-            if (samps_per_buff % nfft) {
-                throw std::runtime_error("FFT point size must be a factor of spb");
-            }
+    if (nfft) {
+        std::cout << "using FFT point size " << nfft << std::endl;
 
-            if (rate % nfft_div) {
-                throw std::runtime_error("nfft_div must be a factor of sample rate");
-            }
+        if (samps_per_buff % nfft) {
+            throw std::runtime_error("FFT point size must be a factor of spb");
+        }
 
+        if (rate % nfft_div) {
+            throw std::runtime_error("nfft_div must be a factor of sample rate");
+        }
+
+        if (not null) {
             open_samples(fft_dotfile, orig_path, zlevel, &fft_outfile, &fft_outbuf);
         }
     }
@@ -305,9 +477,11 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     std::cout << "calls: " << calls << std::endl;
     std::cout << "total: " << total << std::endl;
 
-    close_samples(file, dotfile, dirname, overflows, &outfile, &outbuf);
+    if (not null) {
+        close_samples(file, dotfile, dirname, overflows, &outfile, &outbuf);
+    }
 
-    if (nfft) {
+    if (nfft && not null) {
         close_samples(fft_file, fft_dotfile, dirname, overflows, &fft_outfile, &fft_outbuf);
     }
 
@@ -418,6 +592,8 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         ("int-n", "tune USRP with integer-N tuning")
         ("nfft", po::value<size_t>(&nfft)->default_value(0), "if > 0, calculate PSD over N FFT points")
         ("nfft_div", po::value<size_t>(&nfft_div)->default_value(50), "calculate PSD over sample rate / n samples (e.g 50 == 20ms)")
+        ("vkfft_batches", po::value<size_t>(&batches)->default_value(10), "vkFFT batches")
+        ("vkfft_sample_id", po::value<size_t>(&sample_id)->default_value(0), "vkFFT sample_id")
     ;
     // clang-format on
     po::variables_map vm;
@@ -447,6 +623,13 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     if (nfft && type != "short") {
         std::cout << "FFT mode only supported when sample type short" << std::endl;
         return -0;
+    }
+
+    if (nfft) {
+        if (init_vkfft()) {
+            std::cout << "init_vkfft() failed" << std::endl;
+            return -0;
+        }
     }
 
     // create a usrp device
@@ -515,11 +698,11 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
                          % (usrp->get_rx_bandwidth(channel) / 1e6)
                   << std::endl
                   << std::endl;
-    }
 
     // set the antenna
     if (vm.count("ant"))
         usrp->set_rx_antenna(ant, channel);
+    }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(int64_t(1000 * setup_time)));
 
