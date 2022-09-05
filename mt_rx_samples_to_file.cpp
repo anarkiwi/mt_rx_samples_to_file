@@ -128,7 +128,7 @@ VkFFTResult init_vkfft() {
 
     std::cout << "using vkFFT batch size " << configuration->numberBatches << " on " << vkGPU->physicalDeviceProperties.deviceName << std::endl;
 
-    bufferSize = (uint64_t*)std::aligned_alloc(sizeof(uint64_t), sizeof(uint64_t) * numBuf);
+    bufferSize = (uint64_t*)aligned_alloc(sizeof(uint64_t), sizeof(uint64_t) * numBuf);
     if (!bufferSize) return VKFFT_ERROR_MALLOC_FAILED;
 
     for (uint64_t i = 0; i < numBuf; ++i) {
@@ -139,9 +139,9 @@ VkFFTResult init_vkfft() {
     configuration->bufferNum = numBuf;
     configuration->bufferSize = bufferSize;
 
-    buffer = (VkBuffer*)std::aligned_alloc(sizeof(std::complex<float>), numBuf * sizeof(VkBuffer));
+    buffer = (VkBuffer*)aligned_alloc(sizeof(std::complex<float>), numBuf * sizeof(VkBuffer));
     if (!buffer) return VKFFT_ERROR_MALLOC_FAILED;
-    bufferDeviceMemory = (VkDeviceMemory*)std::aligned_alloc(sizeof(std::complex<float>), numBuf * sizeof(VkDeviceMemory));
+    bufferDeviceMemory = (VkDeviceMemory*)aligned_alloc(sizeof(std::complex<float>), numBuf * sizeof(VkDeviceMemory));
     if (!bufferDeviceMemory) return VKFFT_ERROR_MALLOC_FAILED;
 
     VkFFTResult resFFT = VKFFT_SUCCESS;
@@ -344,7 +344,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 
     for (size_t i = 0; i < buffer_count; ++i) {
         buffers_capacity[i] = max_buffer_size;
-        buffers[i] = (char*)std::aligned_alloc(sizeof(sample_t), buffers_capacity[i]);
+        buffers[i] = (char*)aligned_alloc(sizeof(sample_t), buffers_capacity[i]);
     }
 
     if (not null) {
