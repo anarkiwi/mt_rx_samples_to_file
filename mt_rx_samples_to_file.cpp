@@ -21,6 +21,7 @@
 #include <boost/atomic.hpp>
 #include <boost/lockfree/spsc_queue.hpp>
 #include <cstdio>
+#include <cstdlib>
 #include <chrono>
 #include <complex>
 #include <csignal>
@@ -36,30 +37,42 @@
 namespace po = boost::program_options;
 
 const size_t buffer_count = 16;
-typedef std::vector<char> write_buffer_t;
 static boost::iostreams::filtering_streambuf<boost::iostreams::output> outbuf;
 static boost::iostreams::filtering_streambuf<boost::iostreams::output> fft_outbuf;
 static std::ostream out(&outbuf);
 static std::ostream fft_out(&fft_outbuf);
-static write_buffer_t buffers[buffer_count];
+static char* buffers[buffer_count];
+static size_t buffers_capacity[buffer_count];
 static boost::atomic<bool> writer_done(false);
 boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<buffer_count>> queue;
-static size_t calls = 0, total = 0, nfft = 0, nfft_div = 0, rate = 0, batches = 0, sample_id = 0;
+static size_t calls = 0, total = 0, nfft = 0, nfft_overlap = 0, nfft_div = 0, rate = 0, batches = 0, sample_id = 0;
 
 typedef std::complex<int16_t> sample_t;
 
-
+const uint64_t numBuf = 1;
 static VkGPU vkGPUinst = {};
 static VkGPU *vkGPU = &vkGPUinst;
 static VkFFTConfiguration configurationInst = {};
 static VkFFTConfiguration *configuration = &configurationInst;
-static uint64_t numBuf = 0;
 static uint64_t* bufferSize = NULL;
 static VkBuffer* buffer = NULL;
 static VkDeviceMemory* bufferDeviceMemory = NULL;
 static VkFFTApplication app = {};
 static VkFFTLaunchParams launchParams = {};
 
+static arma::cx_fmat Pw;
+static arma::cx_fmat Pw_in;
+
+void done_vkfft() {
+    for (uint64_t i = 0; i < numBuf; i++) {
+        vkDestroyBuffer(vkGPU->device, buffer[i], NULL);
+	vkFreeMemory(vkGPU->device, bufferDeviceMemory[i], NULL);
+    }
+    free(buffer);
+    free(bufferDeviceMemory);
+    free(bufferSize);
+    deleteVkFFT(&app);
+}
 
 VkFFTResult init_vkfft() {
     vkGPU->enableValidationLayers = 0;
@@ -72,28 +85,28 @@ VkFFTResult init_vkfft() {
     }
     res = setupDebugMessenger(vkGPU);
     if (res != 0) {
-	//printf("Debug messenger creation failed, error code: %" PRIu64 "\n", res);
-	return VKFFT_ERROR_FAILED_TO_SETUP_DEBUG_MESSENGER;
+        //printf("Debug messenger creation failed, error code: %" PRIu64 "\n", res);
+        return VKFFT_ERROR_FAILED_TO_SETUP_DEBUG_MESSENGER;
     }
     res = findPhysicalDevice(vkGPU);
     if (res != 0) {
-	//printf("Physical device not found, error code: %" PRIu64 "\n", res);
-	return VKFFT_ERROR_FAILED_TO_FIND_PHYSICAL_DEVICE;
+        //printf("Physical device not found, error code: %" PRIu64 "\n", res);
+        return VKFFT_ERROR_FAILED_TO_FIND_PHYSICAL_DEVICE;
     }
     res = createDevice(vkGPU, sample_id);
     if (res != 0) {
-	//printf("Device creation failed, error code: %" PRIu64 "\n", res);
-	return VKFFT_ERROR_FAILED_TO_CREATE_DEVICE;
+        //printf("Device creation failed, error code: %" PRIu64 "\n", res);
+        return VKFFT_ERROR_FAILED_TO_CREATE_DEVICE;
     }
     res = createFence(vkGPU);
     if (res != 0) {
-	//printf("Fence creation failed, error code: %" PRIu64 "\n", res);
-	return VKFFT_ERROR_FAILED_TO_CREATE_FENCE;
+        //printf("Fence creation failed, error code: %" PRIu64 "\n", res);
+        return VKFFT_ERROR_FAILED_TO_CREATE_FENCE;
     }
     res = createCommandPool(vkGPU);
     if (res != 0) {
-	//printf("Fence creation failed, error code: %" PRIu64 "\n", res);
-	return VKFFT_ERROR_FAILED_TO_CREATE_COMMAND_POOL;
+        //printf("Fence creation failed, error code: %" PRIu64 "\n", res);
+        return VKFFT_ERROR_FAILED_TO_CREATE_COMMAND_POOL;
     }
     vkGetPhysicalDeviceProperties(vkGPU->physicalDevice, &vkGPU->physicalDeviceProperties);
     vkGetPhysicalDeviceMemoryProperties(vkGPU->physicalDevice, &vkGPU->physicalDeviceMemoryProperties);
@@ -115,30 +128,29 @@ VkFFTResult init_vkfft() {
 
     std::cout << "using vkFFT batch size " << configuration->numberBatches << " on " << vkGPU->physicalDeviceProperties.deviceName << std::endl;
 
-    numBuf = 1;
-    bufferSize = (uint64_t*)malloc(sizeof(uint64_t) * numBuf);
+    bufferSize = (uint64_t*)aligned_alloc(sizeof(uint64_t), sizeof(uint64_t) * numBuf);
     if (!bufferSize) return VKFFT_ERROR_MALLOC_FAILED;
 
     for (uint64_t i = 0; i < numBuf; ++i) {
         bufferSize[i] = {};
-	bufferSize[i] = (uint64_t)sizeof(std::complex<float>) * configuration->size[0] * configuration->numberBatches / numBuf;
+        bufferSize[i] = (uint64_t)sizeof(std::complex<float>) * configuration->size[0] * configuration->numberBatches / numBuf;
     }
 
     configuration->bufferNum = numBuf;
     configuration->bufferSize = bufferSize;
 
-    buffer = (VkBuffer*)malloc(numBuf * sizeof(VkBuffer));
+    buffer = (VkBuffer*)aligned_alloc(sizeof(std::complex<float>), numBuf * sizeof(VkBuffer));
     if (!buffer) return VKFFT_ERROR_MALLOC_FAILED;
-    VkDeviceMemory* bufferDeviceMemory = (VkDeviceMemory*)malloc(numBuf * sizeof(VkDeviceMemory));
+    bufferDeviceMemory = (VkDeviceMemory*)aligned_alloc(sizeof(std::complex<float>), numBuf * sizeof(VkDeviceMemory));
     if (!bufferDeviceMemory) return VKFFT_ERROR_MALLOC_FAILED;
 
     VkFFTResult resFFT = VKFFT_SUCCESS;
 
     for (uint64_t i = 0; i < numBuf; ++i) {
         buffer[i] = {};
-	bufferDeviceMemory[i] = {};
-	resFFT = allocateBuffer(vkGPU, &buffer[i], &bufferDeviceMemory[i], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_HEAP_DEVICE_LOCAL_BIT, bufferSize[i]);
-	if (resFFT != VKFFT_SUCCESS) return VKFFT_ERROR_MALLOC_FAILED;
+        bufferDeviceMemory[i] = {};
+        resFFT = allocateBuffer(vkGPU, &buffer[i], &bufferDeviceMemory[i], VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_HEAP_DEVICE_LOCAL_BIT, bufferSize[i]);
+        if (resFFT != VKFFT_SUCCESS) return VKFFT_ERROR_MALLOC_FAILED;
     }
 
     configuration->buffer = buffer;
@@ -154,41 +166,32 @@ VkFFTResult init_vkfft() {
 template <class T1>
 arma::cx_fmat specgram_cx(const arma::Col<T1>& x, const arma::uword Nfft=512, const arma::uword Noverl=256)
 {
-        arma::cx_fmat Pw;
-
-        //Def params
         arma::uword N = x.size();
         arma::uword D = Nfft-Noverl;
         arma::uword m = 0;
-        if(N > Nfft)
+        const arma::fvec W = arma::conv_to<arma::fvec>::from(sp::hamming(Nfft));
+        const float wc = sum(W);
+        const arma::uword U = static_cast<arma::uword>(floor((N-Noverl)/double(D)));
+        Pw.set_size(Nfft,U);
+        Pw_in.set_size(Nfft,U);
+
+        for(arma::uword k=0; k<=N-Nfft; k+=D)
         {
-            arma::Col<T1> xk(Nfft);
-            const arma::fvec W = arma::conv_to<arma::fvec>::from(sp::hamming(Nfft));
-            const float wc = sum(W);
-            const arma::uword U = static_cast<arma::uword>(floor((N-Noverl)/double(D)));
-            Pw.set_size(Nfft,U);
-            Pw.zeros();
-            arma::cx_fmat Pw_in(Nfft,U);
-            arma::cx_fvec Pxx(Nfft*U);
-
-            for(arma::uword k=0; k<=N-Nfft; k+=D)
-            {
                 Pw_in.col(m++) = x.rows(k,k+Nfft-1) % W;
-            }
+        }
 
-            size_t row_size = Nfft * sizeof(T1);
-            for(arma::uword k=0; k < Pw_in.n_cols; k += configuration->numberBatches)
-            {
+        size_t row_size = Nfft * sizeof(T1);
+        for(arma::uword k=0; k < Pw_in.n_cols; k += configuration->numberBatches)
+        {
                 size_t offset = k * row_size;
                 // TODO: Handle last/uneven batch size - should really retain overlap buffer from previous spectrum() call.
                 uint64_t buffer_size = std::min(bufferSize[0], (uint64_t)((Pw_in.n_cols - k) * row_size));
                 transferDataFromCPU(vkGPU, ((char*)Pw_in.memptr()) + offset, &buffer[0], buffer_size);
                 performVulkanFFT(vkGPU, &app, &launchParams, -1, 1);
                 transferDataToCPU(vkGPU, ((char*)Pw.memptr()) + offset, &buffer[0], buffer_size);
-            }
-
-            Pw /= wc;
         }
+
+        Pw /= wc;
         return Pw;
 }
 
@@ -219,23 +222,24 @@ inline void write_samples()
     arma::cx_fvec psd_in(rate / nfft_div);
 
     while (queue.pop(read_ptr)) {
-        write_buffer_t *buffer_p = buffers + read_ptr;
+        char *buffer_p = buffers[read_ptr];
+        size_t buffer_capacity = buffers_capacity[read_ptr];
         if (!outbuf.empty()) {
-            out.write((const char*)buffer_p->data(), buffer_p->capacity());
+            out.write((const char*)buffer_p, buffer_capacity);
         }
         if (nfft) {
-            sample_t *i_p = (sample_t*) buffer_p->data();
-            for (size_t i = 0; i < buffer_p->capacity() / (psd_in.size() * sizeof(sample_t)); ++i) {
+            sample_t *i_p = (sample_t*) buffer_p;
+            for (size_t i = 0; i < buffer_capacity / (psd_in.size() * sizeof(sample_t)); ++i) {
                 for (size_t fft_p = 0; fft_p < psd_in.size(); ++fft_p, ++i_p) {
                     psd_in[fft_p] = std::complex<float>(i_p->real(), i_p->imag());
                 }
-                arma::fmat psd_out = log10(specgram(psd_in, nfft, nfft/2)) * 10;
+                arma::fmat psd_out = log10(specgram(psd_in, nfft, nfft_overlap)) * 10;
                 if (!fft_outbuf.empty()) {
                     fft_out.write((const char*)psd_out.memptr(), psd_out.n_elem * sizeof(float));
                 }
             }
         }
-        calls += buffer_p->capacity();
+        calls += buffer_capacity;
     }
 }
 
@@ -339,7 +343,8 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     std::string fft_file = dirname + "/" + fft_basename;
 
     for (size_t i = 0; i < buffer_count; ++i) {
-        buffers[i].resize(max_buffer_size);
+        buffers_capacity[i] = max_buffer_size;
+        buffers[i] = (char*)aligned_alloc(sizeof(sample_t), buffers_capacity[i]);
     }
 
     if (not null) {
@@ -396,9 +401,9 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
            and (num_requested_samples != num_total_samps or num_requested_samples == 0)
            and (time_requested == 0.0 or std::chrono::steady_clock::now() < stop_time);) {
         const auto now = std::chrono::steady_clock::now();
-        write_buffer_t *buffer_p = buffers + write_ptr;
+        char *buffer_p = buffers[write_ptr];
         size_t num_rx_samps =
-            rx_stream->recv(buffer_p->data(), max_samples, md, 3.0, enable_size_map);
+            rx_stream->recv(buffer_p, max_samples, md, 3.0, enable_size_map);
 
         if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_TIMEOUT) {
             std::cout << boost::format("Timeout while streaming") << std::endl;
@@ -431,14 +436,11 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
         num_total_samps += num_rx_samps;
         size_t samp_bytes = num_rx_samps * sizeof(samp_type);
         total += samp_bytes;
-        buffer_p = buffers + write_ptr;
-        if (samp_bytes != buffer_p->capacity()) {
-            std::cout << "resize to " << samp_bytes << " from " << buffer_p->capacity() << std::endl;
-            buffer_p->resize(samp_bytes);
-            buffer_p->shrink_to_fit();
-            if (samp_bytes != buffer_p->capacity()) {
-                std::cout << "resize failed, got capacity " << buffer_p->capacity() << std::endl;
-            }
+        buffer_p = buffers[write_ptr];
+        size_t buffer_capacity = buffers_capacity[write_ptr];
+        if (samp_bytes != buffer_capacity) {
+            std::cout << "resize to " << samp_bytes << " from " << buffer_capacity << std::endl;
+            buffers_capacity[write_ptr] = samp_bytes;
         }
         if (!queue.push(write_ptr)) {
             std::cout << "sample buffer queue failed (overflow)" << std::endl;
@@ -486,6 +488,10 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     }
 
     std::cout << "closed" << std::endl;
+
+    for (size_t i = 0; i < buffer_count; ++i) {
+        free(buffers[i]);
+    }
 
     if (stats) {
         std::cout << std::endl;
@@ -590,9 +596,10 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         ("continue", "don't abort on a bad packet")
         ("skip-lo", "skip checking LO lock status")
         ("int-n", "tune USRP with integer-N tuning")
-        ("nfft", po::value<size_t>(&nfft)->default_value(0), "if > 0, calculate PSD over N FFT points")
-        ("nfft_div", po::value<size_t>(&nfft_div)->default_value(50), "calculate PSD over sample rate / n samples (e.g 50 == 20ms)")
-        ("vkfft_batches", po::value<size_t>(&batches)->default_value(10), "vkFFT batches")
+        ("nfft", po::value<size_t>(&nfft)->default_value(0), "if > 0, calculate n FFT points")
+        ("nfft_overlap", po::value<size_t>(&nfft_overlap)->default_value(0), "FFT overlap")
+        ("nfft_div", po::value<size_t>(&nfft_div)->default_value(50), "calculate FFT over sample rate / n samples (e.g 50 == 20ms)")
+        ("vkfft_batches", po::value<size_t>(&batches)->default_value(100), "vkFFT batches")
         ("vkfft_sample_id", po::value<size_t>(&sample_id)->default_value(0), "vkFFT sample_id")
     ;
     // clang-format on
@@ -772,6 +779,11 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         else
             throw std::runtime_error("Unknown type " + type);
     }
+
+    if (nfft) {
+       done_vkfft();
+    }
+
 
     // finished
     std::cout << std::endl << "Done!" << std::endl << std::endl;
