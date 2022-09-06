@@ -240,6 +240,7 @@ inline void write_samples()
             }
         }
         calls += buffer_capacity;
+        std::cout << "." << std::endl;
     }
 }
 
