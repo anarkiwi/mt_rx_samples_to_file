@@ -229,9 +229,6 @@ inline void write_samples()
     while (queue.pop(read_ptr)) {
 	char *buffer_p = buffers[read_ptr];
 	size_t buffer_capacity = buffers_capacity[read_ptr];
-	if (!outbuf.empty()) {
-	    out.write((const char*)buffer_p, buffer_capacity);
-	}
 	if (nfft) {
 	    sample_t *i_p = (sample_t*) buffer_p;
 	    for (size_t i = 0; i < buffer_capacity / (psd_in.size() * sizeof(sample_t)); ++i) {
@@ -241,6 +238,9 @@ inline void write_samples()
 		specgram(psd_in, nfft, nfft_overlap);
 	    }
 	}
+        if (!outbuf.empty()) {
+            out.write((const char*)buffer_p, buffer_capacity);
+        }
 	calls += buffer_capacity;
 	std::cout << "." << std::endl;
     }
