@@ -89,7 +89,9 @@ $ ./plot_fft.py
 ## build
 
 ```
-sudo apt-get update && sudo apt-get install -qy build-essential cmake libuhd-dev libboost-all-dev cppcheck libarmadillo-dev unzip wget libvulkan-dev && \
+sudo apt-get update && sudo apt-get install -qy build-essential cmake cppcheck libarmadillo-dev libboost-all-dev libuhd-dev libvulkan-dev python3-pip hd-host unzip wget && \
+        sudo pip3 install zstandard && \
+        sudo /usr/lib/uhd/utils/uhd_images_downloader.py -t "b2|usb" && \
         wget https://sourceforge.net/projects/sigpack/files/sigpack-1.2.7.zip -O sigpack.zip && unzip sigpack.zip && ln -s sigpack-*/sigpack . && \
         git clone https://github.com/DTolm/VkFFT && \
         cd VkFFT && git checkout 33109a0031c7c005291b81681ec2d1af5c5aefc7 && mkdir build && cd build && cmake .. && make -j $(nproc) && cd ../.. && \
