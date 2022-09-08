@@ -204,13 +204,13 @@ void specgram(const arma::Col<T1>& x, const arma::uword Nfft=512, const arma::uw
 	const arma::uword U = static_cast<arma::uword>(floor((N-Noverl)/double(D)));
 	size_t row_size = Nfft * sizeof(T1);
 	arma::cx_fmat &Pw_in = pw_buffers[fft_write_ptr];
-        arma::cx_fmat &Pw = pw_out_buffers[fft_write_ptr];
+	arma::cx_fmat &Pw = pw_out_buffers[fft_write_ptr];
 	Pw_in.set_size(Nfft,U);
-        Pw.copy_size(Pw_in);
+	Pw.copy_size(Pw_in);
 
 	for(arma::uword k=0; k<=N-Nfft; k+=D)
 	{
-            Pw_in.col(m++) = x.rows(k,k+Nfft-1) % W;
+	    Pw_in.col(m++) = x.rows(k,k+Nfft-1) % W;
 	}
 
 	fft_queue.push(fft_write_ptr);
@@ -238,9 +238,9 @@ inline void write_samples()
 		specgram(psd_in, nfft, nfft_overlap);
 	    }
 	}
-        if (!outbuf.empty()) {
-            out.write((const char*)buffer_p, buffer_capacity);
-        }
+	if (!outbuf.empty()) {
+	    out.write((const char*)buffer_p, buffer_capacity);
+	}
 	calls += buffer_capacity;
 	std::cout << "." << std::endl;
     }
@@ -268,7 +268,7 @@ inline void do_fft() {
 void psd_worker(void)
 {
     while (!fft_done) {
-        do_psd();
+	do_psd();
     }
     do_psd();
     std::cout << "psd worker done" << std::endl;
@@ -352,6 +352,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     bool bw_summary             = false,
     bool stats                  = false,
     bool null                   = false,
+    bool fftnull                = false,
     bool enable_size_map        = false,
     bool continue_on_bad_packet = false)
 {
@@ -405,7 +406,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 	    throw std::runtime_error("nfft_div must be a factor of sample rate");
 	}
 
-	if (not null) {
+	if (not fftnull) {
 	    open_samples(fft_dotfile, orig_path, zlevel, &fft_outfile, &fft_outbuf);
 	}
     }
@@ -524,11 +525,11 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     std::cout << "calls: " << calls << std::endl;
     std::cout << "total: " << total << std::endl;
 
-    if (not null) {
+    if (!outbuf.empty()) {
 	close_samples(file, dotfile, dirname, overflows, &outfile, &outbuf);
     }
 
-    if (nfft && not null) {
+    if (!fft_outbuf.empty()) {
 	close_samples(fft_file, fft_dotfile, dirname, overflows, &fft_outfile, &fft_outbuf);
     }
 
@@ -638,6 +639,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 	("stats", "show average bandwidth on exit")
 	("sizemap", "track packet size and display breakdown on exit")
 	("null", "run without writing to file")
+	("fftnull", "run without writing to FFT file")
 	("continue", "don't abort on a bad packet")
 	("skip-lo", "skip checking LO lock status")
 	("int-n", "tune USRP with integer-N tuning")
@@ -665,6 +667,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     bool bw_summary             = vm.count("progress") > 0;
     bool stats                  = vm.count("stats") > 0;
     bool null                   = vm.count("null") > 0;
+    bool fftnull                = vm.count("fftnull") > 0;
     bool enable_size_map        = vm.count("sizemap") > 0;
     bool continue_on_bad_packet = vm.count("continue") > 0;
 
@@ -804,6 +807,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 	bw_summary,               \
 	stats,                    \
 	null,                     \
+	fftnull,                  \
 	enable_size_map,          \
 	continue_on_bad_packet)
     // recv to file
