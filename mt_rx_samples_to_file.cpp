@@ -61,6 +61,7 @@ static float hammingWindowSum = 0;
 
 typedef std::complex<int16_t> sample_t;
 
+static bool useVkFFT = true;
 const uint64_t kVkNumBuf = 1;
 static VkGPU vkGPU = {};
 static VkFFTConfiguration vkConfiguration = {};
@@ -166,26 +167,11 @@ void free_vkfft() {
 }
 
 
-void specgram_offload(arma::cx_fmat &Pw_in, arma::cx_fmat &Pw) {
-    size_t row_size = Pw_in.n_rows * sizeof(std::complex<float>);
-
-    // TODO: offload windowing.
-    for(arma::uword k=0; k < Pw_in.n_cols; k += vkConfiguration.numberBatches)
-    {
-	size_t offset = k * row_size;
-	// TODO: retain overlap buffer from previous spectrum() call.
-	uint64_t buffer_size = std::min(vkConfiguration.bufferSize[0], (uint64_t)((Pw_in.n_cols - k) * row_size));
-	transferDataFromCPU(&vkGPU, ((char*)Pw_in.memptr()) + offset, &vkConfiguration.buffer[0], buffer_size);
-	performVulkanFFT(&vkGPU, &vkApp, &vkLaunchParams, -1, 1);
-	transferDataToCPU(&vkGPU, ((char*)Pw.memptr()) + offset, &vkConfiguration.buffer[0], buffer_size);
-    }
-}
-
-
 void fft_out_offload(arma::cx_fmat &Pw) {
     ++ffts_out;
     Pw /= hammingWindowSum;
     // TODO: offload C2R
+    // TOOD: write spectrogram as image.
     arma::fmat fft_points_out = log10(real(Pw % conj(Pw))) * 10;
     if (!fft_outbuf.empty()) {
 	fft_out.write((const char*)fft_points_out.memptr(), fft_points_out.n_elem * sizeof(float));
@@ -263,10 +249,38 @@ void fft_out_worker(void)
 }
 
 
+void specgram_offload(arma::cx_fmat &Pw_in, arma::cx_fmat &Pw) {
+    for(arma::uword k=0; k < Pw_in.n_cols; ++k)
+    {
+	Pw.col(k) = arma::fft(Pw_in.col(k), nfft);
+    }
+}
+
+
+void vkfft_specgram_offload(arma::cx_fmat &Pw_in, arma::cx_fmat &Pw) {
+    size_t row_size = Pw_in.n_rows * sizeof(std::complex<float>);
+
+    // TODO: offload windowing.
+    for(arma::uword k=0; k < Pw_in.n_cols; k += vkConfiguration.numberBatches)
+    {
+	size_t offset = k * row_size;
+	// TODO: retain overlap buffer from previous spectrum() call.
+	uint64_t buffer_size = std::min(vkConfiguration.bufferSize[0], (uint64_t)((Pw_in.n_cols - k) * row_size));
+	transferDataFromCPU(&vkGPU, ((char*)Pw_in.memptr()) + offset, &vkConfiguration.buffer[0], buffer_size);
+	performVulkanFFT(&vkGPU, &vkApp, &vkLaunchParams, -1, 1);
+	transferDataToCPU(&vkGPU, ((char*)Pw.memptr()) + offset, &vkConfiguration.buffer[0], buffer_size);
+    }
+}
+
+
 inline void fftin() {
     size_t read_ptr;
     while (in_fft_queue.pop(read_ptr)) {
-	specgram_offload(inFFTBuffers[read_ptr], outFFTbuffers[read_ptr]);
+	if (useVkFFT) {
+	    vkfft_specgram_offload(inFFTBuffers[read_ptr], outFFTbuffers[read_ptr]);
+	} else {
+	    specgram_offload(inFFTBuffers[read_ptr], outFFTbuffers[read_ptr]);
+	}
 	out_fft_queue.push(read_ptr);
     }
 }
@@ -650,6 +664,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 	("nfft", po::value<size_t>(&nfft)->default_value(0), "if > 0, calculate n FFT points")
 	("nfft_overlap", po::value<size_t>(&nfft_overlap)->default_value(0), "FFT overlap")
 	("nfft_div", po::value<size_t>(&nfft_div)->default_value(50), "calculate FFT over sample rate / n samples (e.g 50 == 20ms)")
+	("novkfft", "do not use vkFFT (use software FFT)")
 	("vkfft_batches", po::value<size_t>(&batches)->default_value(100), "vkFFT batches")
 	("vkfft_sample_id", po::value<size_t>(&sample_id)->default_value(0), "vkFFT sample_id")
     ;
@@ -674,6 +689,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     bool fftnull                = vm.count("fftnull") > 0;
     bool enable_size_map        = vm.count("sizemap") > 0;
     bool continue_on_bad_packet = vm.count("continue") > 0;
+    useVkFFT                    = vm.count("novkfft") == 0;
 
     if (enable_size_map)
 	std::cout << "Packet size tracking enabled - will only recv one packet at a time!"
@@ -685,9 +701,11 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     }
 
     if (nfft) {
-	if (init_vkfft(batches, sample_id)) {
-	    std::cout << "init_vkfft() failed" << std::endl;
-	    return -0;
+	if (useVkFFT) {
+	    if (init_vkfft(batches, sample_id)) {
+		std::cout << "init_vkfft() failed" << std::endl;
+		return -0;
+	    }
 	}
 	hammingWindow = arma::conv_to<arma::fvec>::from(sp::hamming(nfft));
 	hammingWindowSum = sum(hammingWindow);
@@ -836,7 +854,9 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     }
 
     if (nfft) {
-       free_vkfft();
+       if (useVkFFT) {
+	   free_vkfft();
+       }
        if (ffts_in != ffts_out) {
 	   std::cout << "fft in/out mismatch - FFT pipeline overflow?" << std::endl;
        }
