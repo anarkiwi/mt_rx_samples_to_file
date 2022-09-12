@@ -16,7 +16,13 @@ $ UHD_IMAGES_DIR=/usr/share/uhd/images mt_rx_samples_to_file --args num_recv_fra
 
 ## FFT support
 
-Requires a Vulkan compatible GPU (on Pi4, add ```dtoverlay=vc4-kms-v3d-pi4``` to ```/boot/firmware/config.txt```).
+Requires a Vulkan compatible GPU
+
+### Pi4
+
+1. Add ```dtoverlay=vc4-kms-v3d-pi4``` to ```/boot/firmware/config.txt```.
+2. If running Ubuntu 22.04 or later, proceed to the Build section. If running Raspbian bullseye, you will need to update your Vulkan/MESA drivers - use https://github.com/jmcerrejon/PiKISS to Configure, Vulkan, main branch first.
+
 
 In this example, 5 seconds of samples centered at 108MHz at 1.024Ms/s are recorded, and the FFT results are plotted in python.
 
