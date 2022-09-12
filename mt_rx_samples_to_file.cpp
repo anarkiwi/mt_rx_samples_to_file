@@ -37,7 +37,7 @@
 namespace po = boost::program_options;
 
 const size_t kFFTbufferCount = 256;
-const size_t kSampleBuffers = 16;
+const size_t kSampleBuffers = 8;
 
 static boost::iostreams::filtering_streambuf<boost::iostreams::output> outbuf;
 static boost::iostreams::filtering_streambuf<boost::iostreams::output> fft_outbuf;
