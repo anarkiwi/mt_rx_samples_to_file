@@ -198,7 +198,9 @@ void specgram(size_t &fft_write_ptr, const arma::Col<T1>& x, const arma::uword N
 	Pw_in.col(m++) = x.rows(k,k+Nfft-1) % hammingWindow;
     }
 
-    in_fft_queue.push(fft_write_ptr);
+    while (!in_fft_queue.push(fft_write_ptr)) {
+        usleep(100);
+    }
 
     if (++fft_write_ptr == kFFTbufferCount) {
 	fft_write_ptr = 0;
@@ -281,7 +283,9 @@ inline void fftin() {
 	} else {
 	    specgram_offload(inFFTBuffers[read_ptr], outFFTbuffers[read_ptr]);
 	}
-	out_fft_queue.push(read_ptr);
+	while (!out_fft_queue.push(read_ptr)) {
+            usleep(100);
+	}
     }
 }
 
@@ -858,7 +862,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 	   free_vkfft();
        }
        if (ffts_in != ffts_out) {
-	   std::cout << "fft in/out mismatch - FFT pipeline overflow?" << std::endl;
+	   std::cout << "fft in/out mismatch - FFT pipeline overflow? increase kFFTbufferCount" << std::endl;
        }
     }
 
