@@ -55,7 +55,7 @@ boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kSampleBuffers>> s
 boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbufferCount>> in_fft_queue;
 boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbufferCount>> out_fft_queue;
 static size_t nfft = 0, nfft_overlap = 0, nfft_div = 0, nfft_ds = 0, rate = 0;
-static size_t curr_nfft_ds = 0, ffts_in = 0, ffts_out = 0
+static size_t curr_nfft_ds = 0, ffts_in = 0, ffts_out = 0;
 
 static arma::fvec hammingWindow;
 static float hammingWindowSum = 0;
