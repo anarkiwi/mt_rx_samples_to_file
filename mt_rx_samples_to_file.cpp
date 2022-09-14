@@ -54,7 +54,8 @@ static boost::atomic<bool> fft_in_worker_done(false);
 boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kSampleBuffers>> sample_queue;
 boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbufferCount>> in_fft_queue;
 boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbufferCount>> out_fft_queue;
-static size_t nfft = 0, nfft_overlap = 0, nfft_div = 0, rate = 0, ffts_in = 0, ffts_out = 0;
+static size_t nfft = 0, nfft_overlap = 0, nfft_div = 0, nfft_ds = 0, rate = 0;
+static size_t curr_nfft_ds = 0, ffts_in = 0, ffts_out = 0
 
 static arma::fvec hammingWindow;
 static float hammingWindowSum = 0;
@@ -199,7 +200,7 @@ void specgram(size_t &fft_write_ptr, const arma::Col<T1>& x, const arma::uword N
     }
 
     while (!in_fft_queue.push(fft_write_ptr)) {
-        usleep(100);
+	usleep(100);
     }
 
     if (++fft_write_ptr == kFFTbufferCount) {
@@ -221,7 +222,10 @@ inline void write_samples(size_t &fft_write_ptr, arma::cx_fvec &fft_samples_in)
 		for (size_t fft_p = 0; fft_p < fft_samples_in.size(); ++fft_p, ++i_p) {
 		    fft_samples_in[fft_p] = std::complex<float>(i_p->real(), i_p->imag());
 		}
-		specgram(fft_write_ptr, fft_samples_in, nfft, nfft_overlap);
+		if (++curr_nfft_ds == nfft_ds) {
+		    specgram(fft_write_ptr, fft_samples_in, nfft, nfft_overlap);
+		    curr_nfft_ds = 0;
+		}
 	    }
 	}
 	if (!outbuf.empty()) {
@@ -284,7 +288,7 @@ inline void fftin() {
 	    specgram_offload(inFFTBuffers[read_ptr], outFFTbuffers[read_ptr]);
 	}
 	while (!out_fft_queue.push(read_ptr)) {
-            usleep(100);
+	    usleep(100);
 	}
     }
 }
@@ -668,6 +672,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 	("nfft", po::value<size_t>(&nfft)->default_value(0), "if > 0, calculate n FFT points")
 	("nfft_overlap", po::value<size_t>(&nfft_overlap)->default_value(0), "FFT overlap")
 	("nfft_div", po::value<size_t>(&nfft_div)->default_value(50), "calculate FFT over sample rate / n samples (e.g 50 == 20ms)")
+	("nfft_ds", po::value<size_t>(&nfft_ds)->default_value(10), "NFFT downsampling interval")
 	("novkfft", "do not use vkFFT (use software FFT)")
 	("vkfft_batches", po::value<size_t>(&batches)->default_value(100), "vkFFT batches")
 	("vkfft_sample_id", po::value<size_t>(&sample_id)->default_value(0), "vkFFT sample_id")
