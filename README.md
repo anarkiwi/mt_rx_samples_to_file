@@ -23,7 +23,8 @@ Requires a Vulkan compatible GPU
 This works on both Raspberry Pi OS (Debian) and Ubuntu.
 
 1. Add `dtoverlay=vc4-kms-v3d-pi4` to `/boot/firmware/config.txt` (`/boot/config.txt` on Raspberry Pi OS).
-2. If running Ubuntu 22.04 or later, proceed to the [Build section](#build). If running Raspberry Pi OS, you will first need to update your Vulkan/MESA drivers - use https://github.com/jmcerrejon/PiKISS to Configure and install Vulkan using the main branch first then proceed to the [Build section](#build).
+2. Make sure your user has access to the ```/dev/dri/renderD128``` device (e.g. ```sudo usermod -a -G render ubuntu```).
+3. If running Ubuntu 22.04 or later, proceed to the [Build section](#build). If running Raspberry Pi OS, you will first need to update your Vulkan/MESA drivers - use https://github.com/jmcerrejon/PiKISS to Configure and install Vulkan using the main branch first then proceed to the [Build section](#build).
 
 In this example, 5 seconds of samples centered at 108MHz at 1.024Ms/s are recorded, and the FFT results are plotted in python.
 
