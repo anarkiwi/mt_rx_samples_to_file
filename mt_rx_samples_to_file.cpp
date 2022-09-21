@@ -374,6 +374,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     const std::string& wire_format,
     const size_t& channel,
     const std::string& file,
+    const std::string& fft_file_arg,
     size_t samps_per_buff,
     size_t zlevel,
     unsigned long long num_requested_samples,
@@ -414,6 +415,9 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     std::string dotfile = dirname + "/." + basename;
     std::string fft_dotfile = dirname + "/." + fft_basename;
     std::string fft_file = dirname + "/" + fft_basename;
+    if (fft_file_arg.size()) {
+	fft_file = fft_file_arg;
+    }
 
     for (size_t i = 0; i < kSampleBuffers; ++i) {
 	sampleBuffersCapacity[i] = max_buffer_size;
@@ -632,7 +636,7 @@ bool check_locked_sensor(std::vector<std::string> sensor_names,
 int UHD_SAFE_MAIN(int argc, char* argv[])
 {
     // variables to be set by po
-    std::string args, file, type, ant, subdev, ref, wirefmt;
+    std::string args, file, fft_file, type, ant, subdev, ref, wirefmt;
     size_t channel, total_num_samps, spb, zlevel, batches, sample_id;
     double option_rate, freq, gain, bw, total_time, setup_time, lo_offset;
 
@@ -673,6 +677,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 	("nfft_overlap", po::value<size_t>(&nfft_overlap)->default_value(0), "FFT overlap")
 	("nfft_div", po::value<size_t>(&nfft_div)->default_value(50), "calculate FFT over sample rate / n samples (e.g 50 == 20ms)")
 	("nfft_ds", po::value<size_t>(&nfft_ds)->default_value(10), "NFFT downsampling interval")
+	("fft_file", po::value<std::string>(&fft_file)->default_value(""), "name of file to write FFT points to (default derive from --file)")
 	("novkfft", "do not use vkFFT (use software FFT)")
 	("vkfft_batches", po::value<size_t>(&batches)->default_value(100), "vkFFT batches")
 	("vkfft_sample_id", po::value<size_t>(&sample_id)->default_value(0), "vkFFT sample_id")
@@ -831,6 +836,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 	wirefmt,                  \
 	channel,                  \
 	file,                     \
+	fft_file,                 \
 	spb,                      \
 	zlevel,                   \
 	total_num_samps,          \
