@@ -328,9 +328,10 @@ void sig_int_handler(int)
 }
 
 
-void open_samples(std::string &dotfile, boost::filesystem::path &orig_path, size_t zlevel,
+void open_samples(std::string &dotfile, size_t zlevel,
 		  std::ofstream *outfile_p, boost::iostreams::filtering_streambuf<boost::iostreams::output> *outbuf_p) {
     std::cout << "opening " << dotfile << std::endl;
+    boost::filesystem::path orig_path(dotfile);
     outfile_p->open(dotfile.c_str(), std::ofstream::binary);
     if (!outfile_p->is_open()) {
 	throw std::runtime_error(dotfile + " could not be opened");
@@ -352,9 +353,12 @@ void open_samples(std::string &dotfile, boost::filesystem::path &orig_path, size
 }
 
 
-void close_samples(const std::string &file, std::string &dotfile, const std::string &dirname, size_t overflows,
+void close_samples(const std::string &file, std::string &dotfile, size_t overflows,
 		   std::ofstream *outfile_p, boost::iostreams::filtering_streambuf<boost::iostreams::output> *outbuf_p) {
     if (outfile_p->is_open()) {
+        boost::filesystem::path orig_path(file);
+        std::string dirname(boost::filesystem::canonical(orig_path.parent_path()).c_str());
+
 	std::cout << "closing " << file << std::endl;
 	boost::iostreams::close(*outbuf_p);
 	outfile_p->close();
@@ -367,6 +371,15 @@ void close_samples(const std::string &file, std::string &dotfile, const std::str
 	}
     }
 }
+
+
+std::string get_prefix_file(const std::string &file, const std::string &prefix) {
+    boost::filesystem::path orig_path(file);
+    std::string basename(orig_path.filename().c_str());
+    std::string dirname(boost::filesystem::canonical(orig_path.parent_path()).c_str());
+    return dirname + "/" + prefix + basename;
+}
+
 
 template <typename samp_type>
 void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
@@ -408,16 +421,15 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     uhd::rx_metadata_t md;
     std::ofstream outfile;
     std::ofstream fft_outfile;
-    boost::filesystem::path orig_path(file);
-    std::string basename(orig_path.filename().c_str());
-    std::string fft_basename = "fft_" + basename;
-    std::string dirname(boost::filesystem::canonical(orig_path.parent_path()).c_str());
-    std::string dotfile = dirname + "/." + basename;
-    std::string fft_dotfile = dirname + "/." + fft_basename;
-    std::string fft_file = dirname + "/" + fft_basename;
+
+    std::string fft_file = get_prefix_file(file, "fft_");
+
     if (fft_file_arg.size()) {
 	fft_file = fft_file_arg;
     }
+
+    std::string dotfile = get_prefix_file(file, ".");
+    std::string fft_dotfile = get_prefix_file(fft_file, ".");
 
     for (size_t i = 0; i < kSampleBuffers; ++i) {
 	sampleBuffersCapacity[i] = max_buffer_size;
@@ -425,7 +437,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     }
 
     if (not null) {
-	open_samples(dotfile, orig_path, zlevel, &outfile, &outbuf);
+	open_samples(dotfile, zlevel, &outfile, &outbuf);
     }
 
     if (nfft) {
@@ -440,7 +452,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 	}
 
 	if (not fftnull) {
-	    open_samples(fft_dotfile, orig_path, zlevel, &fft_outfile, &fft_outbuf);
+	    open_samples(fft_dotfile, zlevel, &fft_outfile, &fft_outbuf);
 	}
     }
 
@@ -556,11 +568,11 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     writer_threads.join_all();
 
     if (!outbuf.empty()) {
-	close_samples(file, dotfile, dirname, overflows, &outfile, &outbuf);
+	close_samples(file, dotfile, overflows, &outfile, &outbuf);
     }
 
     if (!fft_outbuf.empty()) {
-	close_samples(fft_file, fft_dotfile, dirname, overflows, &fft_outfile, &fft_outbuf);
+	close_samples(fft_file, fft_dotfile, overflows, &fft_outfile, &fft_outbuf);
     }
 
     std::cout << "closed" << std::endl;
