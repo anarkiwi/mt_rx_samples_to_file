@@ -20,6 +20,7 @@
 #include <complex>
 #include <csignal>
 #include <iostream>
+#include <thread>
 
 #include "sigpack/sigpack.h"
 #include "sample_writer.h"
