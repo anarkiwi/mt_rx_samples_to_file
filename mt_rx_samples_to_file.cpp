@@ -11,7 +11,6 @@
 #include <uhd/utils/safe_main.hpp>
 #include <uhd/utils/thread.hpp>
 #include <boost/program_options.hpp>
-#include <boost/iostreams/filtering_streambuf.hpp>
 #include <boost/thread/thread.hpp>
 #include <boost/atomic.hpp>
 #include <boost/lockfree/spsc_queue.hpp>
@@ -20,9 +19,7 @@
 #include <chrono>
 #include <complex>
 #include <csignal>
-#include <fstream>
 #include <iostream>
-#include <thread>
 
 #include "sigpack/sigpack.h"
 #include "sample_writer.h"
