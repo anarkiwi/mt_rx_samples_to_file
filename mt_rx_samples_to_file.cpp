@@ -250,16 +250,13 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 	fft_file = fft_file_arg;
     }
 
-    std::string dotfile = get_prefix_file(file, ".");
-    std::string fft_dotfile = get_prefix_file(fft_file, ".");
-
     for (size_t i = 0; i < kSampleBuffers; ++i) {
 	sampleBuffersCapacity[i] = max_buffer_size;
 	sampleBuffers[i] = (char*)aligned_alloc(sizeof(sample_t), sampleBuffersCapacity[i]);
     }
 
     if (not null) {
-	open_samples(dotfile, zlevel, &outfile, &outbuf);
+	open_samples(file, zlevel, &outfile, &outbuf);
     }
 
     if (nfft) {
@@ -274,7 +271,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 	}
 
 	if (not fftnull) {
-	    open_samples(fft_dotfile, zlevel, &fft_outfile, &fft_outbuf);
+	    open_samples(fft_file, zlevel, &fft_outfile, &fft_outbuf);
 	}
     }
 
@@ -390,11 +387,11 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     writer_threads.join_all();
 
     if (!outbuf.empty()) {
-	close_samples(file, dotfile, overflows, &outfile, &outbuf);
+	close_samples(file, overflows, &outfile, &outbuf);
     }
 
     if (!fft_outbuf.empty()) {
-	close_samples(fft_file, fft_dotfile, overflows, &fft_outfile, &fft_outbuf);
+	close_samples(fft_file, overflows, &fft_outfile, &fft_outbuf);
     }
 
     std::cout << "closed" << std::endl;
