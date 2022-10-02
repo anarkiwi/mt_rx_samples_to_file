@@ -10,7 +10,6 @@
 #include <uhd/usrp/multi_usrp.hpp>
 #include <uhd/utils/safe_main.hpp>
 #include <uhd/utils/thread.hpp>
-#include <boost/filesystem.hpp>
 #include <boost/program_options.hpp>
 #include <boost/iostreams/filtering_streambuf.hpp>
 #include <boost/thread/thread.hpp>
@@ -201,14 +200,6 @@ static bool stop_signal_called = false;
 void sig_int_handler(int)
 {
     stop_signal_called = true;
-}
-
-
-std::string get_prefix_file(const std::string &file, const std::string &prefix) {
-    boost::filesystem::path orig_path(file);
-    std::string basename(orig_path.filename().c_str());
-    std::string dirname(boost::filesystem::canonical(orig_path.parent_path()).c_str());
-    return dirname + "/" + prefix + basename;
 }
 
 

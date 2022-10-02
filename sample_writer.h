@@ -1,3 +1,5 @@
+
+std::string get_prefix_file(const std::string &file, const std::string &prefix);
 void open_samples(std::string &dotfile, size_t zlevel,
 		  std::ofstream *outfile_p, boost::iostreams::filtering_streambuf<boost::iostreams::output> *outbuf_p);
 void close_samples(const std::string &file, std::string &dotfile, size_t overflows,

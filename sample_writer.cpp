@@ -5,6 +5,15 @@
 #include <boost/iostreams/filter/gzip.hpp>
 #include <boost/iostreams/filter/zstd.hpp>
 
+
+std::string get_prefix_file(const std::string &file, const std::string &prefix) {
+    boost::filesystem::path orig_path(file);
+    std::string basename(orig_path.filename().c_str());
+    std::string dirname(boost::filesystem::canonical(orig_path.parent_path()).c_str());
+    return dirname + "/" + prefix + basename;
+}
+
+
 void open_samples(std::string &dotfile, size_t zlevel,
 		  std::ofstream *outfile_p, boost::iostreams::filtering_streambuf<boost::iostreams::output> *outbuf_p) {
     std::cout << "opening " << dotfile << std::endl;
