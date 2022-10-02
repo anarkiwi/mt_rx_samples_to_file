@@ -15,5 +15,5 @@ find_package(Armadillo REQUIRED)
 find_package(UHD 3.15.0 REQUIRED)
 find_package(Boost ${Boost_Version} COMPONENTS iostreams thread program_options filesystem REQUIRED)
 
-add_executable(mt_rx_samples_to_file mt_rx_samples_to_file.cpp vkfft.cpp)
+add_executable(mt_rx_samples_to_file mt_rx_samples_to_file.cpp sample_writer.cpp vkfft.cpp)
 target_link_libraries(mt_rx_samples_to_file LINK_PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/VkFFT/build/glslang-master/glslang/libglslang.a ${ARMADILLO_LIBRARIES} ${UHD_LIBRARIES} ${Boost_LIBRARIES} ${Vulkan_LIBRARIES} ${CMAKE_CURRENT_SOURCE_DIR}/VkFFT/build/glslang-master/glslang/libMachineIndependent.a ${CMAKE_CURRENT_SOURCE_DIR}/VkFFT/build/glslang-master/glslang/OSDependent/Unix/libOSDependent.a ${CMAKE_CURRENT_SOURCE_DIR}/VkFFT/build/glslang-master/OGLCompilersDLL/libOGLCompiler.a ${CMAKE_CURRENT_SOURCE_DIR}/VkFFT/build/glslang-master/glslang/libGenericCodeGen.a ${CMAKE_CURRENT_SOURCE_DIR}/VkFFT/build/glslang-master/SPIRV/libSPIRV.a ${CMAKE_CURRENT_SOURCE_DIR}/VkFFT/build/CMakeFiles/Vulkan_FFT.dir/benchmark_scripts/vkFFT_scripts/src/utils_VkFFT.cpp.o)
