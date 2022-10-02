@@ -30,13 +30,13 @@
 
 namespace po = boost::program_options;
 
+typedef std::complex<int16_t> sample_t;
+
 const size_t kFFTbufferCount = 256;
 const size_t kSampleBuffers = 8;
 
-static boost::iostreams::filtering_streambuf<boost::iostreams::output> outbuf;
-static boost::iostreams::filtering_streambuf<boost::iostreams::output> fft_outbuf;
-static std::ostream out(&outbuf);
-static std::ostream fft_out(&fft_outbuf);
+static SampleWriter sample_writer;
+static SampleWriter fft_sample_writer;
 
 static char* sampleBuffers[kSampleBuffers];
 static size_t sampleBuffersCapacity[kSampleBuffers];
@@ -54,8 +54,6 @@ static size_t curr_nfft_ds = 0, ffts_in = 0, ffts_out = 0;
 static arma::fvec hammingWindow;
 static float hammingWindowSum = 0;
 
-typedef std::complex<int16_t> sample_t;
-
 static bool useVkFFT = true;
 
 
@@ -65,9 +63,7 @@ void fft_out_offload(arma::cx_fmat &Pw) {
     // TODO: offload C2R
     // TOOD: write spectrogram as image.
     arma::fmat fft_points_out = log10(real(Pw % conj(Pw))) * 10;
-    if (!fft_outbuf.empty()) {
-	fft_out.write((const char*)fft_points_out.memptr(), fft_points_out.n_elem * sizeof(float));
-    }
+    fft_sample_writer.write((const char*)fft_points_out.memptr(), fft_points_out.n_elem * sizeof(float));
 }
 
 
@@ -119,9 +115,7 @@ inline void write_samples(size_t &fft_write_ptr, arma::cx_fvec &fft_samples_in)
 		}
 	    }
 	}
-	if (!outbuf.empty()) {
-	    out.write((const char*)buffer_p, buffer_capacity);
-	}
+	sample_writer.write((const char*)buffer_p, buffer_capacity);
 	std::cout << "." << std::endl;
     }
 }
@@ -241,8 +235,6 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     std::cout << "max_buffer_size: " << max_buffer_size << " (" << max_samples << " samples)" << std::endl;
 
     uhd::rx_metadata_t md;
-    std::ofstream outfile;
-    std::ofstream fft_outfile;
 
     std::string fft_file = get_prefix_file(file, "fft_");
 
@@ -256,7 +248,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     }
 
     if (not null) {
-	open_samples(file, zlevel, &outfile, &outbuf);
+	sample_writer.open(file, zlevel);
     }
 
     if (nfft) {
@@ -271,7 +263,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 	}
 
 	if (not fftnull) {
-	    open_samples(fft_file, zlevel, &fft_outfile, &fft_outbuf);
+	    fft_sample_writer.open(fft_file, zlevel);
 	}
     }
 
@@ -386,13 +378,8 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 
     writer_threads.join_all();
 
-    if (!outbuf.empty()) {
-	close_samples(file, overflows, &outfile, &outbuf);
-    }
-
-    if (!fft_outbuf.empty()) {
-	close_samples(fft_file, overflows, &fft_outfile, &fft_outbuf);
-    }
+    sample_writer.close(overflows);
+    fft_sample_writer.close(overflows);
 
     std::cout << "closed" << std::endl;
 
