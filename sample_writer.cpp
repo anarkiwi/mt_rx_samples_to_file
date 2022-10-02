@@ -65,13 +65,12 @@ void SampleWriter::open(const std::string &file, size_t zlevel) {
 
 void SampleWriter::close(size_t overflows) {
     if (outfile.is_open()) {
-	std::string dirname(boost::filesystem::canonical(orig_path_.parent_path()).c_str());
-
 	std::cout << "closing " << file_ << std::endl;
 	boost::iostreams::close(*outbuf_p);
 	outfile.close();
 
 	if (overflows) {
+	    std::string dirname(boost::filesystem::canonical(orig_path_.parent_path()).c_str());
 	    std::string overflow_name = dirname + "/overflow-" + file_;
 	    rename(dotfile_.c_str(), overflow_name.c_str());
 	} else {
