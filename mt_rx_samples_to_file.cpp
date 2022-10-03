@@ -28,21 +28,13 @@
 
 namespace po = boost::program_options;
 
-typedef std::complex<int16_t> sample_t;
-
 const size_t kFFTbufferCount = 256;
 const size_t kSampleBuffers = 8;
-
-static SampleWriter sample_writer;
-static SampleWriter fft_sample_writer;
 
 static char* sampleBuffers[kSampleBuffers];
 static size_t sampleBuffersCapacity[kSampleBuffers];
 static arma::cx_fmat inFFTBuffers[kFFTbufferCount];
 static arma::cx_fmat outFFTbuffers[kFFTbufferCount];
-static boost::atomic<bool> samples_input_done(false);
-static boost::atomic<bool> write_samples_worker_done(false);
-static boost::atomic<bool> fft_in_worker_done(false);
 boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kSampleBuffers>> sample_queue;
 boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbufferCount>> in_fft_queue;
 boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbufferCount>> out_fft_queue;
@@ -52,16 +44,14 @@ static size_t curr_nfft_ds = 0, ffts_in = 0, ffts_out = 0;
 static arma::fvec hammingWindow;
 static float hammingWindowSum = 0;
 
-static bool useVkFFT = true;
 
-
-void fft_out_offload(arma::cx_fmat &Pw) {
+void fft_out_offload(SampleWriter *fft_sample_writer, arma::cx_fmat &Pw) {
     ++ffts_out;
     Pw /= hammingWindowSum;
     // TODO: offload C2R
     // TOOD: write spectrogram as image.
     arma::fmat fft_points_out = log10(real(Pw % conj(Pw))) * 10;
-    fft_sample_writer.write((const char*)fft_points_out.memptr(), fft_points_out.n_elem * sizeof(float));
+    fft_sample_writer->write((const char*)fft_points_out.memptr(), fft_points_out.n_elem * sizeof(float));
 }
 
 
@@ -93,8 +83,8 @@ void specgram(size_t &fft_write_ptr, const arma::Col<T1>& x, const arma::uword N
     }
 }
 
-
-inline void write_samples(size_t &fft_write_ptr, arma::cx_fvec &fft_samples_in)
+template <typename samp_type>
+inline void write_samples(SampleWriter *sample_writer, size_t &fft_write_ptr, arma::cx_fvec &fft_samples_in)
 {
     size_t read_ptr;
 
@@ -102,8 +92,8 @@ inline void write_samples(size_t &fft_write_ptr, arma::cx_fvec &fft_samples_in)
 	char *buffer_p = sampleBuffers[read_ptr];
 	size_t buffer_capacity = sampleBuffersCapacity[read_ptr];
 	if (nfft) {
-	    sample_t *i_p = (sample_t*) buffer_p;
-	    for (size_t i = 0; i < buffer_capacity / (fft_samples_in.size() * sizeof(sample_t)); ++i) {
+	    samp_type *i_p = (samp_type*)buffer_p;
+	    for (size_t i = 0; i < buffer_capacity / (fft_samples_in.size() * sizeof(samp_type)); ++i) {
 		for (size_t fft_p = 0; fft_p < fft_samples_in.size(); ++fft_p, ++i_p) {
 		    fft_samples_in[fft_p] = std::complex<float>(i_p->real(), i_p->imag());
 		}
@@ -113,27 +103,27 @@ inline void write_samples(size_t &fft_write_ptr, arma::cx_fvec &fft_samples_in)
 		}
 	    }
 	}
-	sample_writer.write((const char*)buffer_p, buffer_capacity);
+	sample_writer->write(buffer_p, buffer_capacity);
 	std::cout << "." << std::endl;
     }
 }
 
 
-inline void fftout() {
+inline void fftout(SampleWriter *fft_sample_writer) {
     size_t read_ptr;
     while (out_fft_queue.pop(read_ptr)) {
-	fft_out_offload(outFFTbuffers[read_ptr]);
+	fft_out_offload(fft_sample_writer, outFFTbuffers[read_ptr]);
     }
 }
 
 
-void fft_out_worker(void)
+void fft_out_worker(SampleWriter *fft_sample_writer, boost::atomic<bool> *fft_in_worker_done)
 {
-    while (!fft_in_worker_done) {
-	fftout();
+    while (!*fft_in_worker_done) {
+	fftout(fft_sample_writer);
 	usleep(10000);
     }
-    fftout();
+    fftout(fft_sample_writer);
     std::cout << "fft out worker done" << std::endl;
 }
 
@@ -146,14 +136,14 @@ void specgram_offload(arma::cx_fmat &Pw_in, arma::cx_fmat &Pw) {
 }
 
 
-inline void fftin() {
+inline void fftin(bool useVkFFT) {
+    auto offload = specgram_offload;
+    if (useVkFFT) {
+	offload = vkfft_specgram_offload;
+    }
     size_t read_ptr;
     while (in_fft_queue.pop(read_ptr)) {
-	if (useVkFFT) {
-	    vkfft_specgram_offload(inFFTBuffers[read_ptr], outFFTbuffers[read_ptr]);
-	} else {
-	    specgram_offload(inFFTBuffers[read_ptr], outFFTbuffers[read_ptr]);
-	}
+	offload(inFFTBuffers[read_ptr], outFFTbuffers[read_ptr]);
 	while (!out_fft_queue.push(read_ptr)) {
 	    usleep(100);
 	}
@@ -161,29 +151,30 @@ inline void fftin() {
 }
 
 
-void fft_in_worker(void)
+void fft_in_worker(bool useVkFFT, boost::atomic<bool> *write_samples_worker_done, boost::atomic<bool> *fft_in_worker_done)
 {
-    while (!write_samples_worker_done) {
-	fftin();
+    while (!*write_samples_worker_done) {
+	fftin(useVkFFT);
 	usleep(10000);
     }
-    fftin();
-    fft_in_worker_done = true;
+    fftin(useVkFFT);
+    *fft_in_worker_done = true;
     std::cout << "fft worker done" << std::endl;
 }
 
 
-void write_samples_worker(void)
+template <typename samp_type>
+void write_samples_worker(SampleWriter *sample_writer, boost::atomic<bool> *samples_input_done, boost::atomic<bool> *write_samples_worker_done)
 {
     size_t fft_write_ptr = 0;
     arma::cx_fvec fft_samples_in(rate / nfft_div);
 
-    while (!samples_input_done) {
-	write_samples(fft_write_ptr, fft_samples_in);
+    while (!*samples_input_done) {
+	write_samples<samp_type>(sample_writer, fft_write_ptr, fft_samples_in);
 	usleep(10000);
     }
-    write_samples(fft_write_ptr, fft_samples_in);
-    write_samples_worker_done = true;
+    write_samples<samp_type>(sample_writer, fft_write_ptr, fft_samples_in);
+    *write_samples_worker_done = true;
     std::cout << "write samples worker done" << std::endl;
 }
 
@@ -211,7 +202,8 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     bool null                   = false,
     bool fftnull                = false,
     bool enable_size_map        = false,
-    bool continue_on_bad_packet = false)
+    bool continue_on_bad_packet = false,
+    bool useVkFFT               = false)
 {
     unsigned long long num_total_samps = 0;
     // create a receive streamer
@@ -242,8 +234,11 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 
     for (size_t i = 0; i < kSampleBuffers; ++i) {
 	sampleBuffersCapacity[i] = max_buffer_size;
-	sampleBuffers[i] = (char*)aligned_alloc(sizeof(sample_t), sampleBuffersCapacity[i]);
+	sampleBuffers[i] = (char*)aligned_alloc(sizeof(samp_type), sampleBuffersCapacity[i]);
     }
+
+    SampleWriter sample_writer;
+    SampleWriter fft_sample_writer;
 
     if (not null) {
 	sample_writer.open(file, zlevel);
@@ -265,10 +260,14 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 	}
     }
 
+    static boost::atomic<bool> samples_input_done(false);
+    static boost::atomic<bool> write_samples_worker_done(false);
+    static boost::atomic<bool> fft_in_worker_done(false);
+
     boost::thread_group writer_threads;
-    writer_threads.create_thread(write_samples_worker);
-    writer_threads.create_thread(fft_in_worker);
-    writer_threads.create_thread(fft_out_worker);
+    writer_threads.add_thread(new boost::thread(write_samples_worker<samp_type>, &sample_writer, &samples_input_done, &write_samples_worker_done));
+    writer_threads.add_thread(new boost::thread(fft_in_worker, useVkFFT, &write_samples_worker_done, &fft_in_worker_done));
+    writer_threads.add_thread(new boost::thread(fft_out_worker, &fft_sample_writer, &fft_in_worker_done));
 
     bool overflow_message = true;
     size_t overflows = 0;
@@ -519,7 +518,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     bool fftnull                = vm.count("fftnull") > 0;
     bool enable_size_map        = vm.count("sizemap") > 0;
     bool continue_on_bad_packet = vm.count("continue") > 0;
-    useVkFFT                    = vm.count("novkfft") == 0;
+    bool useVkFFT               = vm.count("novkfft") == 0;
 
     if (enable_size_map)
 	std::cout << "Packet size tracking enabled - will only recv one packet at a time!"
@@ -662,27 +661,21 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 	null,                     \
 	fftnull,                  \
 	enable_size_map,          \
-	continue_on_bad_packet)
+	continue_on_bad_packet,   \
+	useVkFFT)
     // recv to file
     if (wirefmt == "s16") {
-	if (type == "double")
-	    recv_to_file<double> recv_to_file_args("f64");
-	else if (type == "float")
-	    recv_to_file<float> recv_to_file_args("f32");
-	else if (type == "short")
-	    recv_to_file<short> recv_to_file_args("s16");
-	else
-	    throw std::runtime_error("Unknown type " + type);
-    } else {
-	if (type == "double")
-	    recv_to_file<std::complex<double>> recv_to_file_args("fc64");
-	else if (type == "float")
-	    recv_to_file<std::complex<float>> recv_to_file_args("fc32");
-	else if (type == "short")
-	    recv_to_file<std::complex<short>> recv_to_file_args("sc16");
-	else
-	    throw std::runtime_error("Unknown type " + type);
+	throw std::runtime_error("non-complex type not supported");
     }
+
+    if (type == "double")
+	recv_to_file<std::complex<double>> recv_to_file_args("fc64");
+    else if (type == "float")
+	recv_to_file<std::complex<float>> recv_to_file_args("fc32");
+    else if (type == "short")
+	recv_to_file<std::complex<short>> recv_to_file_args("sc16");
+    else
+	throw std::runtime_error("Unknown type " + type);
 
     if (nfft) {
        if (useVkFFT) {
