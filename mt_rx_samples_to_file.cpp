@@ -46,7 +46,7 @@ static float hammingWindowSum = 0;
 
 
 template <class T1>
-void specgram_window(size_t &fft_write_ptr, const arma::Col<T1>& x, const arma::uword Nfft=512, const arma::uword Noverl=256)
+void specgram_window(const arma::Col<T1>& x, arma::cx_fmat &Pw_in, const arma::uword Nfft=512, const arma::uword Noverl=256)
 {
     ++ffts_in;
     arma::uword N = x.size();
@@ -54,24 +54,14 @@ void specgram_window(size_t &fft_write_ptr, const arma::Col<T1>& x, const arma::
     arma::uword m = 0;
     const arma::uword U = static_cast<arma::uword>(floor((N-Noverl)/double(D)));
     size_t row_size = Nfft * sizeof(T1);
-    arma::cx_fmat &Pw_in = FFTBuffers[fft_write_ptr].first;
-    arma::cx_fmat &Pw = FFTBuffers[fft_write_ptr].second;
     Pw_in.set_size(Nfft,U);
-    Pw.copy_size(Pw_in);
 
     for(arma::uword k=0; k<=N-Nfft; k+=D)
     {
 	Pw_in.col(m++) = x.rows(k,k+Nfft-1) % hammingWindow;
     }
-
-    while (!in_fft_queue.push(fft_write_ptr)) {
-	usleep(100);
-    }
-
-    if (++fft_write_ptr == kFFTbuffers) {
-	fft_write_ptr = 0;
-    }
 }
+
 
 template <typename samp_type>
 inline void write_samples(SampleWriter *sample_writer, size_t &fft_write_ptr, arma::cx_fvec &fft_samples_in)
@@ -88,8 +78,18 @@ inline void write_samples(SampleWriter *sample_writer, size_t &fft_write_ptr, ar
 		    fft_samples_in[fft_p] = std::complex<float>(i_p->real(), i_p->imag());
 		}
 		if (++curr_nfft_ds == nfft_ds) {
-		    specgram_window(fft_write_ptr, fft_samples_in, nfft, nfft_overlap);
+                    arma::cx_fmat &Pw_in = FFTBuffers[fft_write_ptr].first;
+		    specgram_window(fft_samples_in, Pw_in, nfft, nfft_overlap);
+                    arma::cx_fmat &Pw = FFTBuffers[fft_write_ptr].second;
+                    Pw.copy_size(Pw_in);
 		    curr_nfft_ds = 0;
+                    while (!in_fft_queue.push(fft_write_ptr)) {
+                        usleep(100);
+                    }
+
+                    if (++fft_write_ptr == kFFTbuffers) {
+                        fft_write_ptr = 0;
+                    }
 		}
 	    }
 	}
