@@ -17,3 +17,18 @@ void fft_out_offload(SampleWriter *fft_sample_writer, arma::cx_fmat &Pw, float h
     arma::fmat fft_points_out = log10(real(Pw % conj(Pw))) * 10;
     fft_sample_writer->write((const char*)fft_points_out.memptr(), fft_points_out.n_elem * sizeof(float));
 }
+
+
+void specgram_window(const arma::cx_fvec& x, const arma::fvec &hammingWindow, arma::cx_fmat &Pw_in, const arma::uword Nfft, const arma::uword Noverl)
+{
+    arma::uword N = x.size();
+    arma::uword D = Nfft-Noverl;
+    arma::uword m = 0;
+    const arma::uword U = static_cast<arma::uword>(floor((N-Noverl)/double(D)));
+    Pw_in.set_size(Nfft,U);
+
+    for(arma::uword k=0; k<=N-Nfft; k+=D)
+    {
+        Pw_in.col(m++) = x.rows(k,k+Nfft-1) % hammingWindow;
+    }
+}
