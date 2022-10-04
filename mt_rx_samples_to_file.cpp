@@ -41,9 +41,6 @@ boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbuffers>> out_
 static size_t nfft = 0, nfft_overlap = 0, nfft_div = 0, nfft_ds = 0, rate = 0;
 static size_t curr_nfft_ds = 0, ffts_in = 0, ffts_out = 0;
 
-static arma::fvec hammingWindow;
-static float hammingWindowSum = 0;
-
 
 template <typename samp_type>
 inline void write_samples(SampleWriter *sample_writer, size_t &fft_write_ptr, arma::cx_fvec &fft_samples_in)
@@ -62,7 +59,7 @@ inline void write_samples(SampleWriter *sample_writer, size_t &fft_write_ptr, ar
 		if (++curr_nfft_ds == nfft_ds) {
                     ++ffts_in;
                     arma::cx_fmat &Pw_in = FFTBuffers[fft_write_ptr].first;
-		    specgram_window(fft_samples_in, hammingWindow, Pw_in, nfft, nfft_overlap);
+		    specgram_window(fft_samples_in, Pw_in, nfft, nfft_overlap);
                     arma::cx_fmat &Pw = FFTBuffers[fft_write_ptr].second;
                     Pw.copy_size(Pw_in);
 		    curr_nfft_ds = 0;
@@ -86,7 +83,7 @@ inline void fftout(SampleWriter *fft_sample_writer) {
     size_t read_ptr;
     while (out_fft_queue.pop(read_ptr)) {
         ++ffts_out;
-        fft_out_offload(fft_sample_writer, FFTBuffers[read_ptr].second, hammingWindowSum);
+        fft_out_offload(fft_sample_writer, FFTBuffers[read_ptr].second);
     }
 }
 
@@ -503,8 +500,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 		return -0;
 	    }
 	}
-	hammingWindow = arma::conv_to<arma::fvec>::from(sp::hamming(nfft));
-	hammingWindowSum = sum(hammingWindow);
+        init_hamming_window(nfft);
     }
 
     // create a usrp device

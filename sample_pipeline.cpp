@@ -1,6 +1,16 @@
 #include "sample_pipeline.h"
 
 
+static arma::fvec hammingWindow;
+static float hammingWindowSum = 0;
+
+
+void init_hamming_window(size_t nfft) {
+    hammingWindow = arma::conv_to<arma::fvec>::from(sp::hamming(nfft));
+    hammingWindowSum = sum(hammingWindow);
+}
+
+
 void specgram_offload(arma::cx_fmat &Pw_in, arma::cx_fmat &Pw) {
     const size_t nfft_rows = Pw_in.n_rows;
 
@@ -11,7 +21,7 @@ void specgram_offload(arma::cx_fmat &Pw_in, arma::cx_fmat &Pw) {
 }
 
 
-void fft_out_offload(SampleWriter *fft_sample_writer, arma::cx_fmat &Pw, float hammingWindowSum) {
+void fft_out_offload(SampleWriter *fft_sample_writer, arma::cx_fmat &Pw) {
     Pw /= hammingWindowSum;
     // TODO: offload C2R
     arma::fmat fft_points_out = log10(real(Pw % conj(Pw))) * 10;
@@ -19,7 +29,7 @@ void fft_out_offload(SampleWriter *fft_sample_writer, arma::cx_fmat &Pw, float h
 }
 
 
-void specgram_window(const arma::cx_fvec& x, const arma::fvec &hammingWindow, arma::cx_fmat &Pw_in, const arma::uword Nfft, const arma::uword Noverl)
+void specgram_window(const arma::cx_fvec& x, arma::cx_fmat &Pw_in, const arma::uword Nfft, const arma::uword Noverl)
 {
     arma::uword N = x.size();
     arma::uword D = Nfft-Noverl;
