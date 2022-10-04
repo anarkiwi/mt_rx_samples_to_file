@@ -521,10 +521,12 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 	std::cout << "Packet size tracking enabled - will only recv one packet at a time!"
 		  << std::endl;
 
-    if (nfft && type != "short") {
-	std::cout << "FFT mode only supported when sample type short" << std::endl;
-	return -0;
+    // set the sample rate
+    if (option_rate <= 0.0) {
+        std::cerr << "Please specify a valid sample rate" << std::endl;
+        return ~0;
     }
+    rate = size_t(option_rate);
 
     if (nfft) {
 	if (useVkFFT) {
@@ -553,14 +555,6 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 	usrp->set_rx_subdev_spec(subdev);
 
     std::cout << boost::format("Using Device: %s") % usrp->get_pp_string() << std::endl;
-
-    // set the sample rate
-    if (option_rate <= 0.0) {
-	std::cerr << "Please specify a valid sample rate" << std::endl;
-	return ~0;
-    }
-
-    rate = size_t(option_rate);
     std::cout << boost::format("Setting RX Rate: %f Msps...") % (rate / 1e6) << std::endl;
     usrp->set_rx_rate(rate, channel);
     std::cout << boost::format("Actual RX Rate: %f Msps...")
