@@ -14,6 +14,7 @@
 #include <boost/thread/thread.hpp>
 #include <boost/atomic.hpp>
 #include <boost/lockfree/spsc_queue.hpp>
+#include <boost/scoped_ptr.hpp>
 #include <cstdio>
 #include <cstdlib>
 #include <chrono>
@@ -31,7 +32,7 @@ namespace po = boost::program_options;
 const size_t kFFTbufferCount = 256;
 const size_t kSampleBuffers = 8;
 
-static char* sampleBuffers[kSampleBuffers];
+static boost::scoped_ptr<char> sampleBuffers[kSampleBuffers];
 static size_t sampleBuffersCapacity[kSampleBuffers];
 static arma::cx_fmat inFFTBuffers[kFFTbufferCount];
 static arma::cx_fmat outFFTbuffers[kFFTbufferCount];
@@ -89,7 +90,7 @@ inline void write_samples(SampleWriter *sample_writer, size_t &fft_write_ptr, ar
     size_t read_ptr;
 
     while (sample_queue.pop(read_ptr)) {
-	char *buffer_p = sampleBuffers[read_ptr];
+	char *buffer_p = sampleBuffers[read_ptr].get();
 	size_t buffer_capacity = sampleBuffersCapacity[read_ptr];
 	if (nfft) {
 	    samp_type *i_p = (samp_type*)buffer_p;
@@ -234,14 +235,14 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 
     for (size_t i = 0; i < kSampleBuffers; ++i) {
 	sampleBuffersCapacity[i] = max_buffer_size;
-	sampleBuffers[i] = (char*)aligned_alloc(sizeof(samp_type), sampleBuffersCapacity[i]);
+	sampleBuffers[i].reset((char*)aligned_alloc(sizeof(samp_type), sampleBuffersCapacity[i]));
     }
 
-    SampleWriter sample_writer;
-    SampleWriter fft_sample_writer;
+    boost::scoped_ptr<SampleWriter> sample_writer(new SampleWriter());
+    boost::scoped_ptr<SampleWriter> fft_sample_writer(new SampleWriter());
 
     if (not null) {
-	sample_writer.open(file, zlevel);
+	sample_writer->open(file, zlevel);
     }
 
     if (nfft) {
@@ -256,7 +257,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 	}
 
 	if (not fftnull) {
-	    fft_sample_writer.open(fft_file, zlevel);
+	    fft_sample_writer->open(fft_file, zlevel);
 	}
     }
 
@@ -265,9 +266,9 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     static boost::atomic<bool> fft_in_worker_done(false);
 
     boost::thread_group writer_threads;
-    writer_threads.add_thread(new boost::thread(write_samples_worker<samp_type>, &sample_writer, &samples_input_done, &write_samples_worker_done));
+    writer_threads.add_thread(new boost::thread(write_samples_worker<samp_type>, sample_writer.get(), &samples_input_done, &write_samples_worker_done));
     writer_threads.add_thread(new boost::thread(fft_in_worker, useVkFFT, &write_samples_worker_done, &fft_in_worker_done));
-    writer_threads.add_thread(new boost::thread(fft_out_worker, &fft_sample_writer, &fft_in_worker_done));
+    writer_threads.add_thread(new boost::thread(fft_out_worker, fft_sample_writer.get(), &fft_in_worker_done));
 
     bool overflow_message = true;
     size_t overflows = 0;
@@ -300,7 +301,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 	   and (num_requested_samples != num_total_samps or num_requested_samples == 0)
 	   and (time_requested == 0.0 or std::chrono::steady_clock::now() < stop_time);) {
 	const auto now = std::chrono::steady_clock::now();
-	char *buffer_p = sampleBuffers[write_ptr];
+	char *buffer_p = sampleBuffers[write_ptr].get();
 	size_t num_rx_samps =
 	    rx_stream->recv(buffer_p, max_samples, md, 3.0, enable_size_map);
 
@@ -334,7 +335,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 
 	num_total_samps += num_rx_samps;
 	size_t samp_bytes = num_rx_samps * sizeof(samp_type);
-	buffer_p = sampleBuffers[write_ptr];
+	buffer_p = sampleBuffers[write_ptr].get();
 	size_t buffer_capacity = sampleBuffersCapacity[write_ptr];
 	if (samp_bytes != buffer_capacity) {
 	    std::cout << "resize to " << samp_bytes << " from " << buffer_capacity << std::endl;
@@ -375,14 +376,10 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 
     writer_threads.join_all();
 
-    sample_writer.close(overflows);
-    fft_sample_writer.close(overflows);
+    sample_writer->close(overflows);
+    fft_sample_writer->close(overflows);
 
     std::cout << "closed" << std::endl;
-
-    for (size_t i = 0; i < kSampleBuffers; ++i) {
-	free(sampleBuffers[i]);
-    }
 
     if (stats) {
 	std::cout << std::endl;
