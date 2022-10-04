@@ -32,8 +32,7 @@ namespace po = boost::program_options;
 const size_t kFFTbufferCount = 256;
 const size_t kSampleBuffers = 8;
 
-static boost::scoped_ptr<char> sampleBuffers[kSampleBuffers];
-static size_t sampleBuffersCapacity[kSampleBuffers];
+static std::pair<boost::scoped_ptr<char>, size_t> sampleBuffers[kSampleBuffers];
 static arma::cx_fmat inFFTBuffers[kFFTbufferCount];
 static arma::cx_fmat outFFTbuffers[kFFTbufferCount];
 boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kSampleBuffers>> sample_queue;
@@ -50,7 +49,6 @@ void fft_out_offload(SampleWriter *fft_sample_writer, arma::cx_fmat &Pw) {
     ++ffts_out;
     Pw /= hammingWindowSum;
     // TODO: offload C2R
-    // TOOD: write spectrogram as image.
     arma::fmat fft_points_out = log10(real(Pw % conj(Pw))) * 10;
     fft_sample_writer->write((const char*)fft_points_out.memptr(), fft_points_out.n_elem * sizeof(float));
 }
@@ -90,8 +88,8 @@ inline void write_samples(SampleWriter *sample_writer, size_t &fft_write_ptr, ar
     size_t read_ptr;
 
     while (sample_queue.pop(read_ptr)) {
-	char *buffer_p = sampleBuffers[read_ptr].get();
-	size_t buffer_capacity = sampleBuffersCapacity[read_ptr];
+	char *buffer_p = sampleBuffers[read_ptr].first.get();
+	size_t buffer_capacity = sampleBuffers[read_ptr].second;
 	if (nfft) {
 	    samp_type *i_p = (samp_type*)buffer_p;
 	    for (size_t i = 0; i < buffer_capacity / (fft_samples_in.size() * sizeof(samp_type)); ++i) {
@@ -234,8 +232,8 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     }
 
     for (size_t i = 0; i < kSampleBuffers; ++i) {
-	sampleBuffersCapacity[i] = max_buffer_size;
-	sampleBuffers[i].reset((char*)aligned_alloc(sizeof(samp_type), sampleBuffersCapacity[i]));
+	sampleBuffers[i].second = max_buffer_size;
+	sampleBuffers[i].first.reset((char*)aligned_alloc(sizeof(samp_type), sampleBuffers[i].second));
     }
 
     boost::scoped_ptr<SampleWriter> sample_writer(new SampleWriter());
@@ -301,7 +299,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 	   and (num_requested_samples != num_total_samps or num_requested_samples == 0)
 	   and (time_requested == 0.0 or std::chrono::steady_clock::now() < stop_time);) {
 	const auto now = std::chrono::steady_clock::now();
-	char *buffer_p = sampleBuffers[write_ptr].get();
+	char *buffer_p = sampleBuffers[write_ptr].first.get();
 	size_t num_rx_samps =
 	    rx_stream->recv(buffer_p, max_samples, md, 3.0, enable_size_map);
 
@@ -335,11 +333,11 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 
 	num_total_samps += num_rx_samps;
 	size_t samp_bytes = num_rx_samps * sizeof(samp_type);
-	buffer_p = sampleBuffers[write_ptr].get();
-	size_t buffer_capacity = sampleBuffersCapacity[write_ptr];
+	buffer_p = sampleBuffers[write_ptr].first.get();
+	size_t buffer_capacity = sampleBuffers[write_ptr].second;
 	if (samp_bytes != buffer_capacity) {
 	    std::cout << "resize to " << samp_bytes << " from " << buffer_capacity << std::endl;
-	    sampleBuffersCapacity[write_ptr] = samp_bytes;
+	    sampleBuffers[write_ptr].second = samp_bytes;
 	}
 	if (!sample_queue.push(write_ptr)) {
 	    std::cout << "sample buffer queue failed (overflow)" << std::endl;
