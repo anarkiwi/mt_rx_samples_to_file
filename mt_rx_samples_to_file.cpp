@@ -29,15 +29,14 @@
 
 namespace po = boost::program_options;
 
-const size_t kFFTbufferCount = 256;
 const size_t kSampleBuffers = 8;
+const size_t kFFTbuffers = 256;
 
 static std::pair<boost::scoped_ptr<char>, size_t> sampleBuffers[kSampleBuffers];
-static arma::cx_fmat inFFTBuffers[kFFTbufferCount];
-static arma::cx_fmat outFFTbuffers[kFFTbufferCount];
+static std::pair<arma::cx_fmat, arma::cx_fmat> FFTBuffers[kFFTbuffers];
 boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kSampleBuffers>> sample_queue;
-boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbufferCount>> in_fft_queue;
-boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbufferCount>> out_fft_queue;
+boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbuffers>> in_fft_queue;
+boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbuffers>> out_fft_queue;
 static size_t nfft = 0, nfft_overlap = 0, nfft_div = 0, nfft_ds = 0, rate = 0;
 static size_t curr_nfft_ds = 0, ffts_in = 0, ffts_out = 0;
 
@@ -55,7 +54,7 @@ void fft_out_offload(SampleWriter *fft_sample_writer, arma::cx_fmat &Pw) {
 
 
 template <class T1>
-void specgram(size_t &fft_write_ptr, const arma::Col<T1>& x, const arma::uword Nfft=512, const arma::uword Noverl=256)
+void specgram_window(size_t &fft_write_ptr, const arma::Col<T1>& x, const arma::uword Nfft=512, const arma::uword Noverl=256)
 {
     ++ffts_in;
     arma::uword N = x.size();
@@ -63,8 +62,8 @@ void specgram(size_t &fft_write_ptr, const arma::Col<T1>& x, const arma::uword N
     arma::uword m = 0;
     const arma::uword U = static_cast<arma::uword>(floor((N-Noverl)/double(D)));
     size_t row_size = Nfft * sizeof(T1);
-    arma::cx_fmat &Pw_in = inFFTBuffers[fft_write_ptr];
-    arma::cx_fmat &Pw = outFFTbuffers[fft_write_ptr];
+    arma::cx_fmat &Pw_in = FFTBuffers[fft_write_ptr].first;
+    arma::cx_fmat &Pw = FFTBuffers[fft_write_ptr].second;
     Pw_in.set_size(Nfft,U);
     Pw.copy_size(Pw_in);
 
@@ -77,7 +76,7 @@ void specgram(size_t &fft_write_ptr, const arma::Col<T1>& x, const arma::uword N
 	usleep(100);
     }
 
-    if (++fft_write_ptr == kFFTbufferCount) {
+    if (++fft_write_ptr == kFFTbuffers) {
 	fft_write_ptr = 0;
     }
 }
@@ -97,7 +96,7 @@ inline void write_samples(SampleWriter *sample_writer, size_t &fft_write_ptr, ar
 		    fft_samples_in[fft_p] = std::complex<float>(i_p->real(), i_p->imag());
 		}
 		if (++curr_nfft_ds == nfft_ds) {
-		    specgram(fft_write_ptr, fft_samples_in, nfft, nfft_overlap);
+		    specgram_window(fft_write_ptr, fft_samples_in, nfft, nfft_overlap);
 		    curr_nfft_ds = 0;
 		}
 	    }
@@ -111,7 +110,7 @@ inline void write_samples(SampleWriter *sample_writer, size_t &fft_write_ptr, ar
 inline void fftout(SampleWriter *fft_sample_writer) {
     size_t read_ptr;
     while (out_fft_queue.pop(read_ptr)) {
-	fft_out_offload(fft_sample_writer, outFFTbuffers[read_ptr]);
+	fft_out_offload(fft_sample_writer, FFTBuffers[read_ptr].second);
     }
 }
 
@@ -135,14 +134,13 @@ void specgram_offload(arma::cx_fmat &Pw_in, arma::cx_fmat &Pw) {
 }
 
 
-inline void fftin(bool useVkFFT) {
-    auto offload = specgram_offload;
-    if (useVkFFT) {
-	offload = vkfft_specgram_offload;
-    }
+typedef void (*offload_p)(arma::cx_fmat&, arma::cx_fmat&);
+
+
+inline void fftin(offload_p offload) {
     size_t read_ptr;
     while (in_fft_queue.pop(read_ptr)) {
-	offload(inFFTBuffers[read_ptr], outFFTbuffers[read_ptr]);
+	offload(FFTBuffers[read_ptr].first, FFTBuffers[read_ptr].second);
 	while (!out_fft_queue.push(read_ptr)) {
 	    usleep(100);
 	}
@@ -152,11 +150,15 @@ inline void fftin(bool useVkFFT) {
 
 void fft_in_worker(bool useVkFFT, boost::atomic<bool> *write_samples_worker_done, boost::atomic<bool> *fft_in_worker_done)
 {
+    offload_p offload = specgram_offload;
+    if (useVkFFT) {
+        offload = vkfft_specgram_offload;
+    }
     while (!*write_samples_worker_done) {
-	fftin(useVkFFT);
+	fftin(offload);
 	usleep(10000);
     }
-    fftin(useVkFFT);
+    fftin(offload);
     *fft_in_worker_done = true;
     std::cout << "fft worker done" << std::endl;
 }
@@ -677,7 +679,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 	   free_vkfft();
        }
        if (ffts_in != ffts_out) {
-	   std::cout << "fft in/out mismatch - FFT pipeline overflow? increase kFFTbufferCount" << std::endl;
+	   std::cout << "fft in/out mismatch - FFT pipeline overflow? increase kFFTbuffers" << std::endl;
        }
     }
 
