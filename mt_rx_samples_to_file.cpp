@@ -45,15 +45,6 @@ static arma::fvec hammingWindow;
 static float hammingWindowSum = 0;
 
 
-void fft_out_offload(SampleWriter *fft_sample_writer, arma::cx_fmat &Pw) {
-    ++ffts_out;
-    Pw /= hammingWindowSum;
-    // TODO: offload C2R
-    arma::fmat fft_points_out = log10(real(Pw % conj(Pw))) * 10;
-    fft_sample_writer->write((const char*)fft_points_out.memptr(), fft_points_out.n_elem * sizeof(float));
-}
-
-
 template <class T1>
 void specgram_window(size_t &fft_write_ptr, const arma::Col<T1>& x, const arma::uword Nfft=512, const arma::uword Noverl=256)
 {
@@ -111,7 +102,7 @@ inline void write_samples(SampleWriter *sample_writer, size_t &fft_write_ptr, ar
 inline void fftout(SampleWriter *fft_sample_writer) {
     size_t read_ptr;
     while (out_fft_queue.pop(read_ptr)) {
-	fft_out_offload(fft_sample_writer, FFTBuffers[read_ptr].second);
+	fft_out_offload(fft_sample_writer, FFTBuffers[read_ptr].second, hammingWindowSum);
     }
 }
 
