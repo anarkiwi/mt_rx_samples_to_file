@@ -25,6 +25,7 @@
 
 #include "sigpack/sigpack.h"
 #include "sample_writer.h"
+#include "sample_pipeline.h"
 #include "vkfft.h"
 
 namespace po = boost::program_options;
@@ -123,14 +124,6 @@ void fft_out_worker(SampleWriter *fft_sample_writer, boost::atomic<bool> *fft_in
     }
     fftout(fft_sample_writer);
     std::cout << "fft out worker done" << std::endl;
-}
-
-
-void specgram_offload(arma::cx_fmat &Pw_in, arma::cx_fmat &Pw) {
-    for(arma::uword k=0; k < Pw_in.n_cols; ++k)
-    {
-	Pw.col(k) = arma::fft(Pw_in.col(k), nfft);
-    }
 }
 
 

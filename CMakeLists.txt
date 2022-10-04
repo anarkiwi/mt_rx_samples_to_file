@@ -20,5 +20,7 @@ target_include_directories(vkfft PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/VkFFT/glslan
 
 add_library(sample_writer sample_writer.cpp)
 
+add_library(sample_pipeline sample_pipeline.cpp)
+
 add_executable(mt_rx_samples_to_file mt_rx_samples_to_file.cpp)
-target_link_libraries(mt_rx_samples_to_file vkfft sample_writer)
+target_link_libraries(mt_rx_samples_to_file vkfft sample_writer sample_pipeline)
