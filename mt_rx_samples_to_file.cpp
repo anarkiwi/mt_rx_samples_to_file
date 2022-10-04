@@ -102,7 +102,8 @@ inline void write_samples(SampleWriter *sample_writer, size_t &fft_write_ptr, ar
 inline void fftout(SampleWriter *fft_sample_writer) {
     size_t read_ptr;
     while (out_fft_queue.pop(read_ptr)) {
-	fft_out_offload(fft_sample_writer, FFTBuffers[read_ptr].second, hammingWindowSum);
+        ++ffts_out;
+        fft_out_offload(fft_sample_writer, FFTBuffers[read_ptr].second, hammingWindowSum);
     }
 }
 
