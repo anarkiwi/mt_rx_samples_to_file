@@ -1,5 +1,6 @@
 #include "sample_pipeline.h"
 
+const size_t kSampleBuffers = 8;
 const size_t kFFTbuffers = 256;
 
 static arma::fvec hammingWindow;
@@ -8,6 +9,47 @@ static float hammingWindowSum = 0;
 static std::pair<arma::cx_fmat, arma::cx_fmat> FFTBuffers[kFFTbuffers];
 boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbuffers>> in_fft_queue;
 boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbuffers>> out_fft_queue;
+static std::pair<boost::scoped_ptr<char>, size_t> sampleBuffers[kSampleBuffers];
+boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kSampleBuffers>> sample_queue;
+
+
+void enqueue_samples(size_t &buffer_ptr) {
+    if (!sample_queue.push(buffer_ptr)) {
+        std::cout << "sample buffer queue failed (overflow)" << std::endl;
+        return;
+    }
+
+    if (++buffer_ptr == kSampleBuffers) {
+        buffer_ptr = 0;
+    }
+}
+
+
+void set_sample_buffer_capacity(size_t buffer_ptr, size_t buffer_size) {
+    sampleBuffers[buffer_ptr].second = buffer_size;
+}
+
+
+void init_sample_buffers(size_t max_buffer_size, size_t samp_size) {
+    for (size_t i = 0; i < kSampleBuffers; ++i) {
+        set_sample_buffer_capacity(i, max_buffer_size);
+        sampleBuffers[i].first.reset((char*)aligned_alloc(samp_size, max_buffer_size));
+    }
+}
+
+
+char *get_sample_buffer(size_t buffer_ptr, size_t *buffer_capacity) {
+    if (buffer_capacity) {
+        *buffer_capacity = sampleBuffers[buffer_ptr].second;
+    }
+    return sampleBuffers[buffer_ptr].first.get();
+}
+
+
+bool dequeue_samples(size_t &read_ptr) {
+    return sample_queue.pop(read_ptr);
+}
+
 
 
 typedef void (*offload_p)(arma::cx_fmat&, arma::cx_fmat&);

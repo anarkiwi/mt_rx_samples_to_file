@@ -1,5 +1,6 @@
 #include <boost/atomic.hpp>
 #include <boost/lockfree/spsc_queue.hpp>
+#include <boost/scoped_ptr.hpp>
 
 #include "sigpack/sigpack.h"
 #include "sample_writer.h"
@@ -10,3 +11,9 @@ void queue_fft(const arma::cx_fvec &fft_samples_in, size_t &fft_write_ptr, size_
 void fft_out_offload(SampleWriter *fft_sample_writer, arma::cx_fmat &Pw);
 void fft_out_worker(SampleWriter *fft_sample_writer, boost::atomic<bool> *fft_in_worker_done);
 void fft_in_worker(bool useVkFFT, boost::atomic<bool> *write_samples_worker_done, boost::atomic<bool> *fft_in_worker_done);
+void enqueue_samples(size_t &buffer_ptr);
+void set_sample_buffer_capacity(size_t buffer_ptr, size_t buffer_size);
+void init_sample_buffers(size_t max_buffer_size, size_t samp_size);
+char *get_sample_buffer(size_t buffer_ptr, size_t *buffer_capacity);
+bool dequeue_samples(size_t &read_ptr);
+

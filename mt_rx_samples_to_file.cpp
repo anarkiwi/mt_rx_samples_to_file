@@ -12,7 +12,6 @@
 #include <uhd/utils/thread.hpp>
 #include <boost/program_options.hpp>
 #include <boost/thread/thread.hpp>
-#include <boost/lockfree/spsc_queue.hpp>
 #include <boost/scoped_ptr.hpp>
 #include <cstdio>
 #include <cstdlib>
@@ -29,45 +28,8 @@
 
 namespace po = boost::program_options;
 
-const size_t kSampleBuffers = 8;
-
-static std::pair<boost::scoped_ptr<char>, size_t> sampleBuffers[kSampleBuffers];
-boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kSampleBuffers>> sample_queue;
 static size_t nfft = 0, nfft_overlap = 0, nfft_div = 0, nfft_ds = 0, rate = 0;
 static size_t curr_nfft_ds = 0;
-
-
-void queue_sample_buffer(size_t &buffer_ptr) {
-    if (!sample_queue.push(buffer_ptr)) {
-	std::cout << "sample buffer queue failed (overflow)" << std::endl;
-	return;
-    }
-
-    if (++buffer_ptr == kSampleBuffers) {
-	buffer_ptr = 0;
-    }
-}
-
-
-void set_sample_buffer_capacity(size_t buffer_ptr, size_t buffer_size) {
-    sampleBuffers[buffer_ptr].second = buffer_size;
-}
-
-
-void init_sample_buffers(size_t max_buffer_size, size_t samp_size) {
-    for (size_t i = 0; i < kSampleBuffers; ++i) {
-	set_sample_buffer_capacity(i, max_buffer_size);
-	sampleBuffers[i].first.reset((char*)aligned_alloc(samp_size, max_buffer_size));
-    }
-}
-
-
-char *get_sample_buffer(size_t buffer_ptr, size_t *buffer_capacity) {
-    if (buffer_capacity) {
-	*buffer_capacity = sampleBuffers[buffer_ptr].second;
-    }
-    return sampleBuffers[buffer_ptr].first.get();
-}
 
 
 template <typename samp_type>
@@ -75,7 +37,7 @@ inline void write_samples(SampleWriter *sample_writer, size_t &fft_write_ptr, ar
 {
     size_t read_ptr;
     size_t buffer_capacity = 0;
-    while (sample_queue.pop(read_ptr)) {
+    while (dequeue_samples(read_ptr)) {
 	char *buffer_p = get_sample_buffer(read_ptr, &buffer_capacity);
 	if (nfft) {
 	    samp_type *i_p = (samp_type*)buffer_p;
@@ -270,7 +232,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 	    set_sample_buffer_capacity(write_ptr, samp_bytes);
 	}
 
-	queue_sample_buffer(write_ptr);
+	enqueue_samples(write_ptr);
 
 	if (enable_size_map) {
 	    SizeMap::iterator it = mapSizes.find(num_rx_samps);
