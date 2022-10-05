@@ -1,6 +1,8 @@
 #include <boost/filesystem.hpp>
 #include <boost/iostreams/filtering_streambuf.hpp>
 
+#ifndef SAMPLE_WRITER_H
+#define SAMPLE_WRITER_H 1
 class SampleWriter
 {
 public:
@@ -20,3 +22,4 @@ private:
 
 
 std::string get_prefix_file(const std::string &file, const std::string &prefix);
+#endif
