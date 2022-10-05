@@ -12,7 +12,6 @@
 #include <uhd/utils/thread.hpp>
 #include <boost/program_options.hpp>
 #include <boost/thread/thread.hpp>
-#include <boost/atomic.hpp>
 #include <boost/lockfree/spsc_queue.hpp>
 #include <boost/scoped_ptr.hpp>
 #include <cstdio>
@@ -31,29 +30,11 @@
 namespace po = boost::program_options;
 
 const size_t kSampleBuffers = 8;
-const size_t kFFTbuffers = 256;
 
 static std::pair<boost::scoped_ptr<char>, size_t> sampleBuffers[kSampleBuffers];
-static std::pair<arma::cx_fmat, arma::cx_fmat> FFTBuffers[kFFTbuffers];
 boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kSampleBuffers>> sample_queue;
-boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbuffers>> in_fft_queue;
-boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbuffers>> out_fft_queue;
 static size_t nfft = 0, nfft_overlap = 0, nfft_div = 0, nfft_ds = 0, rate = 0;
-static size_t curr_nfft_ds = 0, ffts_in = 0, ffts_out = 0;
-
-
-void queue_fft(const arma::cx_fvec &fft_samples_in, size_t &fft_write_ptr) {
-    arma::cx_fmat &Pw_in = FFTBuffers[fft_write_ptr].first;
-    specgram_window(fft_samples_in, Pw_in, nfft, nfft_overlap);
-    arma::cx_fmat &Pw = FFTBuffers[fft_write_ptr].second;
-    Pw.copy_size(Pw_in);
-    while (!in_fft_queue.push(fft_write_ptr)) {
-        usleep(100);
-    }
-    if (++fft_write_ptr == kFFTbuffers) {
-        fft_write_ptr = 0;
-    }
-}
+static size_t curr_nfft_ds = 0;
 
 
 template <typename samp_type>
@@ -71,65 +52,14 @@ inline void write_samples(SampleWriter *sample_writer, size_t &fft_write_ptr, ar
 		    fft_samples_in[fft_p] = std::complex<float>(i_p->real(), i_p->imag());
 		}
 		if (++curr_nfft_ds == nfft_ds) {
-                    ++ffts_in;
                     curr_nfft_ds = 0;
-                    queue_fft(fft_samples_in, fft_write_ptr);
+                    queue_fft(fft_samples_in, fft_write_ptr, nfft, nfft_overlap);
 		}
 	    }
 	}
 	sample_writer->write(buffer_p, buffer_capacity);
 	std::cout << "." << std::endl;
     }
-}
-
-
-inline void fftout(SampleWriter *fft_sample_writer) {
-    size_t read_ptr;
-    while (out_fft_queue.pop(read_ptr)) {
-        ++ffts_out;
-        fft_out_offload(fft_sample_writer, FFTBuffers[read_ptr].second);
-    }
-}
-
-
-void fft_out_worker(SampleWriter *fft_sample_writer, boost::atomic<bool> *fft_in_worker_done)
-{
-    while (!*fft_in_worker_done) {
-	fftout(fft_sample_writer);
-	usleep(10000);
-    }
-    fftout(fft_sample_writer);
-    std::cout << "fft out worker done" << std::endl;
-}
-
-
-typedef void (*offload_p)(arma::cx_fmat&, arma::cx_fmat&);
-
-
-inline void fftin(offload_p offload) {
-    size_t read_ptr;
-    while (in_fft_queue.pop(read_ptr)) {
-	offload(FFTBuffers[read_ptr].first, FFTBuffers[read_ptr].second);
-	while (!out_fft_queue.push(read_ptr)) {
-	    usleep(100);
-	}
-    }
-}
-
-
-void fft_in_worker(bool useVkFFT, boost::atomic<bool> *write_samples_worker_done, boost::atomic<bool> *fft_in_worker_done)
-{
-    offload_p offload = specgram_offload;
-    if (useVkFFT) {
-        offload = vkfft_specgram_offload;
-    }
-    while (!*write_samples_worker_done) {
-	fftin(offload);
-	usleep(10000);
-    }
-    fftin(offload);
-    *fft_in_worker_done = true;
-    std::cout << "fft worker done" << std::endl;
 }
 
 
@@ -639,9 +569,6 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     if (nfft) {
        if (useVkFFT) {
 	   free_vkfft();
-       }
-       if (ffts_in != ffts_out) {
-	   std::cout << "fft in/out mismatch - FFT pipeline overflow? increase kFFTbuffers" << std::endl;
        }
     }
 
