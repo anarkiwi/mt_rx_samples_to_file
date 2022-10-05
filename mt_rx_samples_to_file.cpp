@@ -42,6 +42,20 @@ static size_t nfft = 0, nfft_overlap = 0, nfft_div = 0, nfft_ds = 0, rate = 0;
 static size_t curr_nfft_ds = 0, ffts_in = 0, ffts_out = 0;
 
 
+void queue_fft(const arma::cx_fvec &fft_samples_in, size_t &fft_write_ptr) {
+    arma::cx_fmat &Pw_in = FFTBuffers[fft_write_ptr].first;
+    specgram_window(fft_samples_in, Pw_in, nfft, nfft_overlap);
+    arma::cx_fmat &Pw = FFTBuffers[fft_write_ptr].second;
+    Pw.copy_size(Pw_in);
+    while (!in_fft_queue.push(fft_write_ptr)) {
+        usleep(100);
+    }
+    if (++fft_write_ptr == kFFTbuffers) {
+        fft_write_ptr = 0;
+    }
+}
+
+
 template <typename samp_type>
 inline void write_samples(SampleWriter *sample_writer, size_t &fft_write_ptr, arma::cx_fvec &fft_samples_in)
 {
@@ -58,18 +72,8 @@ inline void write_samples(SampleWriter *sample_writer, size_t &fft_write_ptr, ar
 		}
 		if (++curr_nfft_ds == nfft_ds) {
                     ++ffts_in;
-                    arma::cx_fmat &Pw_in = FFTBuffers[fft_write_ptr].first;
-		    specgram_window(fft_samples_in, Pw_in, nfft, nfft_overlap);
-                    arma::cx_fmat &Pw = FFTBuffers[fft_write_ptr].second;
-                    Pw.copy_size(Pw_in);
-		    curr_nfft_ds = 0;
-                    while (!in_fft_queue.push(fft_write_ptr)) {
-                        usleep(100);
-                    }
-
-                    if (++fft_write_ptr == kFFTbuffers) {
-                        fft_write_ptr = 0;
-                    }
+                    curr_nfft_ds = 0;
+                    queue_fft(fft_samples_in, fft_write_ptr);
 		}
 	    }
 	}
