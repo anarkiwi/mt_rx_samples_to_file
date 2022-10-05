@@ -29,11 +29,10 @@
 namespace po = boost::program_options;
 
 static size_t nfft = 0, nfft_overlap = 0, nfft_div = 0, nfft_ds = 0, rate = 0;
-static size_t curr_nfft_ds = 0;
 
 
 template <typename samp_type>
-inline void write_samples(SampleWriter *sample_writer, size_t &fft_write_ptr, arma::cx_fvec &fft_samples_in)
+inline void write_samples(SampleWriter *sample_writer, size_t &fft_write_ptr, arma::cx_fvec &fft_samples_in, size_t &curr_nfft_ds)
 {
     size_t read_ptr;
     size_t buffer_capacity = 0;
@@ -61,13 +60,14 @@ template <typename samp_type>
 void write_samples_worker(SampleWriter *sample_writer, boost::atomic<bool> *samples_input_done, boost::atomic<bool> *write_samples_worker_done)
 {
     size_t fft_write_ptr = 0;
+    size_t curr_nfft_ds = 0;
     arma::cx_fvec fft_samples_in(rate / nfft_div);
 
     while (!*samples_input_done) {
-	write_samples<samp_type>(sample_writer, fft_write_ptr, fft_samples_in);
+	write_samples<samp_type>(sample_writer, fft_write_ptr, fft_samples_in, curr_nfft_ds);
 	usleep(10000);
     }
-    write_samples<samp_type>(sample_writer, fft_write_ptr, fft_samples_in);
+    write_samples<samp_type>(sample_writer, fft_write_ptr, fft_samples_in, curr_nfft_ds);
     *write_samples_worker_done = true;
     std::cout << "write samples worker done" << std::endl;
 }
