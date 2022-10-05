@@ -52,8 +52,8 @@ inline void write_samples(SampleWriter *sample_writer, size_t &fft_write_ptr, ar
 		    fft_samples_in[fft_p] = std::complex<float>(i_p->real(), i_p->imag());
 		}
 		if (++curr_nfft_ds == nfft_ds) {
-                    curr_nfft_ds = 0;
-                    queue_fft(fft_samples_in, fft_write_ptr, nfft, nfft_overlap);
+		    curr_nfft_ds = 0;
+		    queue_fft(fft_samples_in, fft_write_ptr, nfft, nfft_overlap);
 		}
 	    }
 	}
@@ -422,8 +422,8 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 
     // set the sample rate
     if (option_rate <= 0.0) {
-        std::cerr << "Please specify a valid sample rate" << std::endl;
-        return ~0;
+	std::cerr << "Please specify a valid sample rate" << std::endl;
+	return ~0;
     }
     rate = size_t(option_rate);
 
@@ -434,7 +434,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 		return -0;
 	    }
 	}
-        init_hamming_window(nfft);
+	init_hamming_window(nfft);
     }
 
     // create a usrp device

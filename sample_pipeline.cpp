@@ -18,7 +18,7 @@ void specgram_offload(arma::cx_fmat &Pw_in, arma::cx_fmat &Pw) {
 
     for(arma::uword k=0; k < Pw_in.n_cols; ++k)
     {
-        Pw.col(k) = arma::fft(Pw_in.col(k), nfft_rows);
+	Pw.col(k) = arma::fft(Pw_in.col(k), nfft_rows);
     }
 }
 
@@ -26,10 +26,10 @@ void specgram_offload(arma::cx_fmat &Pw_in, arma::cx_fmat &Pw) {
 inline void fftin(offload_p offload) {
     size_t read_ptr;
     while (in_fft_queue.pop(read_ptr)) {
-        offload(FFTBuffers[read_ptr].first, FFTBuffers[read_ptr].second);
-        while (!out_fft_queue.push(read_ptr)) {
-            usleep(100);
-        }
+	offload(FFTBuffers[read_ptr].first, FFTBuffers[read_ptr].second);
+	while (!out_fft_queue.push(read_ptr)) {
+	    usleep(100);
+	}
     }
 }
 
@@ -38,11 +38,11 @@ void fft_in_worker(bool useVkFFT, boost::atomic<bool> *write_samples_worker_done
 {
     offload_p offload = specgram_offload;
     if (useVkFFT) {
-        offload = vkfft_specgram_offload;
+	offload = vkfft_specgram_offload;
     }
     while (!*write_samples_worker_done) {
-        fftin(offload);
-        usleep(10000);
+	fftin(offload);
+	usleep(10000);
     }
     fftin(offload);
     *fft_in_worker_done = true;
@@ -53,7 +53,7 @@ void fft_in_worker(bool useVkFFT, boost::atomic<bool> *write_samples_worker_done
 void fftout(SampleWriter *fft_sample_writer) {
     size_t read_ptr;
     while (out_fft_queue.pop(read_ptr)) {
-        fft_out_offload(fft_sample_writer, FFTBuffers[read_ptr].second);
+	fft_out_offload(fft_sample_writer, FFTBuffers[read_ptr].second);
     }
 }
 
@@ -61,8 +61,8 @@ void fftout(SampleWriter *fft_sample_writer) {
 void fft_out_worker(SampleWriter *fft_sample_writer, boost::atomic<bool> *fft_in_worker_done)
 {
     while (!*fft_in_worker_done) {
-        fftout(fft_sample_writer);
-        usleep(10000);
+	fftout(fft_sample_writer);
+	usleep(10000);
     }
     fftout(fft_sample_writer);
     std::cout << "fft out worker done" << std::endl;
@@ -79,7 +79,7 @@ void specgram_window(const arma::cx_fvec& x, arma::cx_fmat &Pw_in, const arma::u
 
     for(arma::uword k=0; k<=N-Nfft; k+=D)
     {
-        Pw_in.col(m++) = x.rows(k,k+Nfft-1) % hammingWindow;
+	Pw_in.col(m++) = x.rows(k,k+Nfft-1) % hammingWindow;
     }
 }
 
@@ -90,10 +90,10 @@ void queue_fft(const arma::cx_fvec &fft_samples_in, size_t &fft_write_ptr, size_
     arma::cx_fmat &Pw = FFTBuffers[fft_write_ptr].second;
     Pw.copy_size(Pw_in);
     while (!in_fft_queue.push(fft_write_ptr)) {
-        usleep(100);
+	usleep(100);
     }
     if (++fft_write_ptr == kFFTbuffers) {
-        fft_write_ptr = 0;
+	fft_write_ptr = 0;
     }
 }
 
