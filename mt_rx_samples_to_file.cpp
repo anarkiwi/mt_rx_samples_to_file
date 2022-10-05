@@ -37,14 +37,46 @@ static size_t nfft = 0, nfft_overlap = 0, nfft_div = 0, nfft_ds = 0, rate = 0;
 static size_t curr_nfft_ds = 0;
 
 
+void queue_sample_buffer(size_t &buffer_ptr) {
+    if (!sample_queue.push(buffer_ptr)) {
+	std::cout << "sample buffer queue failed (overflow)" << std::endl;
+	return;
+    }
+
+    if (++buffer_ptr == kSampleBuffers) {
+	buffer_ptr = 0;
+    }
+}
+
+
+void set_sample_buffer_capacity(size_t buffer_ptr, size_t buffer_size) {
+    sampleBuffers[buffer_ptr].second = buffer_size;
+}
+
+
+void init_sample_buffers(size_t max_buffer_size, size_t samp_size) {
+    for (size_t i = 0; i < kSampleBuffers; ++i) {
+	set_sample_buffer_capacity(i, max_buffer_size);
+	sampleBuffers[i].first.reset((char*)aligned_alloc(samp_size, max_buffer_size));
+    }
+}
+
+
+char *get_sample_buffer(size_t buffer_ptr, size_t *buffer_capacity) {
+    if (buffer_capacity) {
+	*buffer_capacity = sampleBuffers[buffer_ptr].second;
+    }
+    return sampleBuffers[buffer_ptr].first.get();
+}
+
+
 template <typename samp_type>
 inline void write_samples(SampleWriter *sample_writer, size_t &fft_write_ptr, arma::cx_fvec &fft_samples_in)
 {
     size_t read_ptr;
-
+    size_t buffer_capacity = 0;
     while (sample_queue.pop(read_ptr)) {
-	char *buffer_p = sampleBuffers[read_ptr].first.get();
-	size_t buffer_capacity = sampleBuffers[read_ptr].second;
+	char *buffer_p = get_sample_buffer(read_ptr, &buffer_capacity);
 	if (nfft) {
 	    samp_type *i_p = (samp_type*)buffer_p;
 	    for (size_t i = 0; i < buffer_capacity / (fft_samples_in.size() * sizeof(samp_type)); ++i) {
@@ -121,7 +153,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     const size_t max_samps_per_packet = rx_stream->get_max_num_samps();
     const size_t max_samples = std::max(max_samps_per_packet, samps_per_buff);
     std::cout << "max_samps_per_packet from stream: " << max_samps_per_packet << std::endl;
-    static size_t max_buffer_size = max_samples * sizeof(samp_type);
+    const size_t max_buffer_size = max_samples * sizeof(samp_type);
     std::cout << "max_buffer_size: " << max_buffer_size << " (" << max_samples << " samples)" << std::endl;
 
     uhd::rx_metadata_t md;
@@ -132,10 +164,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 	fft_file = fft_file_arg;
     }
 
-    for (size_t i = 0; i < kSampleBuffers; ++i) {
-	sampleBuffers[i].second = max_buffer_size;
-	sampleBuffers[i].first.reset((char*)aligned_alloc(sizeof(samp_type), sampleBuffers[i].second));
-    }
+    init_sample_buffers(max_buffer_size, sizeof(samp_type));
 
     boost::scoped_ptr<SampleWriter> sample_writer(new SampleWriter());
     boost::scoped_ptr<SampleWriter> fft_sample_writer(new SampleWriter());
@@ -192,6 +221,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     auto last_update                     = start_time;
     unsigned long long last_update_samps = 0;
     size_t write_ptr = 0;
+    size_t buffer_capacity = 0;
 
     // Run this loop until either time expired (if a duration was given), until
     // the requested number of samples were collected (if such a number was
@@ -200,7 +230,8 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 	   and (num_requested_samples != num_total_samps or num_requested_samples == 0)
 	   and (time_requested == 0.0 or std::chrono::steady_clock::now() < stop_time);) {
 	const auto now = std::chrono::steady_clock::now();
-	char *buffer_p = sampleBuffers[write_ptr].first.get();
+	set_sample_buffer_capacity(write_ptr, max_buffer_size);
+	char *buffer_p = get_sample_buffer(write_ptr, &buffer_capacity);
 	size_t num_rx_samps =
 	    rx_stream->recv(buffer_p, max_samples, md, 3.0, enable_size_map);
 
@@ -234,18 +265,12 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 
 	num_total_samps += num_rx_samps;
 	size_t samp_bytes = num_rx_samps * sizeof(samp_type);
-	buffer_p = sampleBuffers[write_ptr].first.get();
-	size_t buffer_capacity = sampleBuffers[write_ptr].second;
 	if (samp_bytes != buffer_capacity) {
 	    std::cout << "resize to " << samp_bytes << " from " << buffer_capacity << std::endl;
-	    sampleBuffers[write_ptr].second = samp_bytes;
+	    set_sample_buffer_capacity(write_ptr, samp_bytes);
 	}
-	if (!sample_queue.push(write_ptr)) {
-	    std::cout << "sample buffer queue failed (overflow)" << std::endl;
-	}
-	if (++write_ptr == kSampleBuffers) {
-	    write_ptr = 0;
-	}
+
+	queue_sample_buffer(write_ptr);
 
 	if (enable_size_map) {
 	    SizeMap::iterator it = mapSizes.find(num_rx_samps);
