@@ -90,8 +90,6 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
         fft_file.clear();
     }
 
-    init_sample_buffers(max_buffer_size, sizeof(samp_type));
-
     if (nfft) {
 	std::cout << "using FFT point size " << nfft << std::endl;
 
@@ -104,6 +102,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 	}
     }
 
+    init_sample_buffers(max_buffer_size, sizeof(samp_type));
     sample_pipeline_start(type, file, fft_file, zlevel, useVkFFT, nfft, nfft_overlap, nfft_div, nfft_ds, rate);
 
     bool overflow_message = true;
@@ -122,7 +121,6 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     const auto start_time = std::chrono::steady_clock::now();
 
     rx_stream->issue_stream_cmd(stream_cmd);
-
     const auto stop_time =
 	start_time + std::chrono::milliseconds(int64_t(1000 * time_requested));
     // Track time and samps between updating the BW summary
@@ -205,7 +203,6 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     stream_cmd.stream_mode = uhd::stream_cmd_t::STREAM_MODE_STOP_CONTINUOUS;
     rx_stream->issue_stream_cmd(stream_cmd);
     std::cout << "stream stopped" << std::endl;
-
     sample_pipeline_stop(overflows);
 
     if (stats) {
