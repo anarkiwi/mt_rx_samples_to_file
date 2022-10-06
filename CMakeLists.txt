@@ -28,6 +28,6 @@ add_executable(mt_rx_samples_to_file mt_rx_samples_to_file.cpp)
 target_link_libraries(mt_rx_samples_to_file sample_pipeline sample_writer ${Boost_LIBRARIES} ${UHD_LIBRARIES})
 
 add_executable(sample_pipeline_test sample_pipeline_test.cpp)
-target_link_libraries(sample_pipeline_test sample_pipeline sample_writer ${Boost_LIBRARIES})
+target_link_libraries(sample_pipeline_test sample_pipeline sample_writer ${ARMADILLO_LIBRARIES} ${Boost_LIBRARIES})
 
 add_test(NAME sample_pipeline_test COMMAND sample_pipeline_test)
