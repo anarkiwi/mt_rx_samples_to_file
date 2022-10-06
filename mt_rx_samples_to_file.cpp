@@ -20,11 +20,10 @@
 #include <thread>
 
 #include "sample_pipeline.h"
-#include "vkfft.h"
 
 namespace po = boost::program_options;
 
-static size_t nfft = 0, nfft_overlap = 0, nfft_div = 0, nfft_ds = 0, rate = 0;
+static size_t nfft = 0, nfft_overlap = 0, nfft_div = 0, nfft_ds = 0, rate = 0, batches = 0, sample_id = 0;
 
 
 static bool stop_signal_called = false;
@@ -103,7 +102,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     }
 
     init_sample_buffers(max_buffer_size, sizeof(samp_type));
-    sample_pipeline_start(type, file, fft_file, zlevel, useVkFFT, nfft, nfft_overlap, nfft_div, nfft_ds, rate);
+    sample_pipeline_start(type, file, fft_file, zlevel, useVkFFT, nfft, nfft_overlap, nfft_div, nfft_ds, rate, batches, sample_id);
 
     bool overflow_message = true;
     size_t overflows = 0;
@@ -273,7 +272,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 {
     // variables to be set by po
     std::string args, file, fft_file, type, ant, subdev, ref, wirefmt;
-    size_t channel, total_num_samps, spb, zlevel, batches, sample_id;
+    size_t channel, total_num_samps, spb, zlevel;
     double option_rate, freq, gain, bw, total_time, setup_time, lo_offset;
 
     // setup the program options
@@ -351,16 +350,6 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 	return ~0;
     }
     rate = size_t(option_rate);
-
-    if (nfft) {
-	if (useVkFFT) {
-	    if (init_vkfft(batches, sample_id, nfft)) {
-		std::cout << "init_vkfft() failed" << std::endl;
-		return -0;
-	    }
-	}
-	init_hamming_window(nfft);
-    }
 
     // create a usrp device
     std::cout << std::endl;
@@ -491,12 +480,6 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 	recv_to_file<std::complex<short>> recv_to_file_args("sc16");
     else
 	throw std::runtime_error("Unknown type " + type);
-
-    if (nfft) {
-       if (useVkFFT) {
-	   free_vkfft();
-       }
-    }
 
     // finished
     std::cout << std::endl << "Done!" << std::endl << std::endl;

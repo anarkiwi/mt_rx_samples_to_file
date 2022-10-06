@@ -15,8 +15,9 @@ static arma::fvec hammingWindow;
 static float hammingWindowSum = 0;
 
 static size_t nfft = 0, nfft_overlap = 0,  nfft_ds = 0;
-
+static bool useVkFFT = false;
 static offload_p offload;
+
 static std::pair<arma::cx_fmat, arma::cx_fmat> FFTBuffers[kFFTbuffers];
 boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbuffers>> in_fft_queue;
 boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbuffers>> out_fft_queue;
@@ -217,15 +218,18 @@ void write_samples_worker(const std::string &type)
 }
 
 
-void sample_pipeline_start(const std::string &type, const std::string &file, const std::string &fft_file, size_t zlevel, bool useVkFFT, size_t nfft_, size_t nfft_overlap_, size_t nfft_div, size_t nfft_ds_, size_t rate) {
+void sample_pipeline_start(const std::string &type, const std::string &file, const std::string &fft_file, size_t zlevel, bool useVkFFT_, size_t nfft_, size_t nfft_overlap_, size_t nfft_div, size_t nfft_ds_, size_t rate, size_t batches, size_t sample_id) {
     nfft = nfft_;
     nfft_overlap_ = nfft_overlap_;
     nfft_ds = nfft_ds_;
+    useVkFFT = useVkFFT_;
 
     offload = specgram_offload;
     if (useVkFFT) {
         offload = vkfft_specgram_offload;
+        init_vkfft(batches, sample_id, nfft);
     }
+    init_hamming_window(nfft);
     fft_samples_in.set_size(rate / nfft_div); 
     samples_input_done = false;
     write_samples_worker_done = false;
@@ -249,4 +253,7 @@ void sample_pipeline_stop(size_t overflows) {
     writer_threads.join_all();
     sample_writer->close(overflows);
     fft_sample_writer->close(overflows);
+    if (useVkFFT) {
+        free_vkfft();
+    }
 }
