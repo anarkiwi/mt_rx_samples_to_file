@@ -25,9 +25,9 @@ add_library(sample_pipeline sample_pipeline.cpp)
 target_link_libraries(sample_pipeline vkfft ${ARMADILLO_LIBRARIES} ${Boost_LIBRARIES} ${Vulkan_LIBRARIES})
 
 add_executable(mt_rx_samples_to_file mt_rx_samples_to_file.cpp)
-target_link_libraries(mt_rx_samples_to_file sample_writer sample_pipeline ${Boost_LIBRARIES} ${UHD_LIBRARIES})
+target_link_libraries(mt_rx_samples_to_file sample_pipeline sample_writer ${Boost_LIBRARIES} ${UHD_LIBRARIES})
 
 add_executable(sample_pipeline_test sample_pipeline_test.cpp)
-target_link_libraries(sample_pipeline_test ${Boost_UNIT_TEST_FRAMEWORK_LIBRARY})
+target_link_libraries(sample_pipeline_test sample_pipeline sample_writer ${Boost_LIBRARIES})
 
 add_test(NAME sample_pipeline_test COMMAND sample_pipeline_test)
