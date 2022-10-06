@@ -37,12 +37,12 @@ boost::thread_group writer_threads;
 
 void enqueue_samples(size_t &buffer_ptr) {
     if (!sample_queue.push(buffer_ptr)) {
-        std::cout << "sample buffer queue failed (overflow)" << std::endl;
-        return;
+	std::cout << "sample buffer queue failed (overflow)" << std::endl;
+	return;
     }
 
     if (++buffer_ptr == kSampleBuffers) {
-        buffer_ptr = 0;
+	buffer_ptr = 0;
     }
 }
 
@@ -54,15 +54,15 @@ void set_sample_buffer_capacity(size_t buffer_ptr, size_t buffer_size) {
 
 void init_sample_buffers(size_t max_buffer_size, size_t samp_size) {
     for (size_t i = 0; i < kSampleBuffers; ++i) {
-        set_sample_buffer_capacity(i, max_buffer_size);
-        sampleBuffers[i].first.reset((char*)aligned_alloc(samp_size, max_buffer_size));
+	set_sample_buffer_capacity(i, max_buffer_size);
+	sampleBuffers[i].first.reset((char*)aligned_alloc(samp_size, max_buffer_size));
     }
 }
 
 
 char *get_sample_buffer(size_t buffer_ptr, size_t *buffer_capacity) {
     if (buffer_capacity) {
-        *buffer_capacity = sampleBuffers[buffer_ptr].second;
+	*buffer_capacity = sampleBuffers[buffer_ptr].second;
     }
     return sampleBuffers[buffer_ptr].first.get();
 }
@@ -173,21 +173,21 @@ void write_samples(size_t &fft_write_ptr, size_t &curr_nfft_ds)
     size_t read_ptr;
     size_t buffer_capacity = 0;
     while (dequeue_samples(read_ptr)) {
-        char *buffer_p = get_sample_buffer(read_ptr, &buffer_capacity);
-        if (nfft) {
-            samp_type *i_p = (samp_type*)buffer_p;
-            for (size_t i = 0; i < buffer_capacity / (fft_samples_in.size() * sizeof(samp_type)); ++i) {
-                for (size_t fft_p = 0; fft_p < fft_samples_in.size(); ++fft_p, ++i_p) {
-                    fft_samples_in[fft_p] = std::complex<float>(i_p->real(), i_p->imag());
-                }
-                if (++curr_nfft_ds == nfft_ds) {
-                    curr_nfft_ds = 0;
-                    queue_fft(fft_write_ptr);
-                }
-            }
-        }
-        sample_writer->write(buffer_p, buffer_capacity);
-        std::cout << "." << std::endl;
+	char *buffer_p = get_sample_buffer(read_ptr, &buffer_capacity);
+	if (nfft) {
+	    samp_type *i_p = (samp_type*)buffer_p;
+	    for (size_t i = 0; i < buffer_capacity / (fft_samples_in.size() * sizeof(samp_type)); ++i) {
+		for (size_t fft_p = 0; fft_p < fft_samples_in.size(); ++fft_p, ++i_p) {
+		    fft_samples_in[fft_p] = std::complex<float>(i_p->real(), i_p->imag());
+		}
+		if (++curr_nfft_ds == nfft_ds) {
+		    curr_nfft_ds = 0;
+		    queue_fft(fft_write_ptr);
+		}
+	    }
+	}
+	sample_writer->write(buffer_p, buffer_capacity);
+	std::cout << "." << std::endl;
     }
 }
 
@@ -195,13 +195,13 @@ void write_samples(size_t &fft_write_ptr, size_t &curr_nfft_ds)
 void wrap_write_samples(const std::string &type, size_t &fft_write_ptr, size_t &curr_nfft_ds)
 {
     if (type == "double")
-        write_samples<std::complex<double>>(fft_write_ptr, curr_nfft_ds);
+	write_samples<std::complex<double>>(fft_write_ptr, curr_nfft_ds);
     else if (type == "float")
-        write_samples<std::complex<float>>(fft_write_ptr, curr_nfft_ds);
+	write_samples<std::complex<float>>(fft_write_ptr, curr_nfft_ds);
     else if (type == "short")
-        write_samples<std::complex<short>>(fft_write_ptr, curr_nfft_ds);
+	write_samples<std::complex<short>>(fft_write_ptr, curr_nfft_ds);
     else
-        throw std::runtime_error("Unknown type " + type);
+	throw std::runtime_error("Unknown type " + type);
 }
 
 
@@ -211,8 +211,8 @@ void write_samples_worker(const std::string &type)
     size_t curr_nfft_ds = 0;
 
     while (!samples_input_done) {
-        wrap_write_samples(type, fft_write_ptr, curr_nfft_ds);
-        usleep(10000);
+	wrap_write_samples(type, fft_write_ptr, curr_nfft_ds);
+	usleep(10000);
     }
 
     wrap_write_samples(type, fft_write_ptr, curr_nfft_ds);
@@ -229,21 +229,21 @@ void sample_pipeline_start(const std::string &type, const std::string &file, con
 
     offload = specgram_offload;
     if (useVkFFT) {
-        offload = vkfft_specgram_offload;
-        init_vkfft(batches, sample_id, nfft);
+	offload = vkfft_specgram_offload;
+	init_vkfft(batches, sample_id, nfft);
     }
     init_hamming_window(nfft);
-    fft_samples_in.set_size(rate / nfft_div); 
+    fft_samples_in.set_size(rate / nfft_div);
     samples_input_done = false;
     write_samples_worker_done = false;
     fft_in_worker_done = false;
     sample_writer.reset(new SampleWriter());
     fft_sample_writer.reset(new SampleWriter());
     if (file.size()) {
-        sample_writer->open(file, zlevel);
+	sample_writer->open(file, zlevel);
     }
     if (fft_file.size()) {
-        fft_sample_writer->open(fft_file, zlevel);
+	fft_sample_writer->open(fft_file, zlevel);
     }
     writer_threads.add_thread(new boost::thread(write_samples_worker, type));
     writer_threads.add_thread(new boost::thread(fft_in_worker));
@@ -257,6 +257,6 @@ void sample_pipeline_stop(size_t overflows) {
     sample_writer->close(overflows);
     fft_sample_writer->close(overflows);
     if (useVkFFT) {
-        free_vkfft();
+	free_vkfft();
     }
 }

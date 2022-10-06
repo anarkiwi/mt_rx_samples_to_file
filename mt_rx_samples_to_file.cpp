@@ -83,11 +83,11 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     }
 
     if (null) {
-        file.clear();
+	file.clear();
     }
 
     if (fftnull) {
-        fft_file.clear();
+	fft_file.clear();
     }
 
     if (nfft) {
@@ -451,7 +451,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 
 #define recv_to_file_args(format) \
     (usrp,                        \
-        type,                     \
+	type,                     \
 	format,                   \
 	wirefmt,                  \
 	channel,                  \

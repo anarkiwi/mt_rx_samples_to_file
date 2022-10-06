@@ -35,10 +35,17 @@ BOOST_AUTO_TEST_CASE(RandomFFTTest)
     arma::Col<std::complex<float>> disk_samples;
     disk_samples.copy_size(samples);
     FILE *samples_fp = fopen(file.c_str(), "rb");
-    int z = fread(disk_samples.memptr(), sizeof(std::complex<float>), disk_samples.size(), samples_fp);
+    int samples_bytes = fread(disk_samples.memptr(), sizeof(std::complex<float>), disk_samples.size(), samples_fp);
     fclose(samples_fp);
-    BOOST_TEST(z == samples.size());
+    BOOST_TEST(samples_bytes == samples.size());
     BOOST_TEST(arma::all(samples == disk_samples));
+    FILE *fft_samples_fp = fopen(fft_file.c_str(), "rb");
+    arma::fvec fft(samples.size());
+    int fft_bytes = fread(fft.memptr(), sizeof(float), fft.size(), fft_samples_fp);
+    BOOST_TEST(fft_bytes == fft.size());
+    float mean = arma::mean(fft);
+    BOOST_TEST(((mean > -20) && (mean < 0)));
+    fclose(fft_samples_fp);
     remove_all(tmpdir);
 }
 
