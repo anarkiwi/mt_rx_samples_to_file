@@ -208,3 +208,13 @@ void write_samples_worker(const std::string &type, SampleWriter *sample_writer, 
     *write_samples_worker_done = true;
     std::cout << "write samples worker done" << std::endl;
 }
+
+
+void sample_pipeline_start() {
+
+}
+
+
+void sample_pipeline_stop() {
+
+}

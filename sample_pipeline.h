@@ -17,3 +17,5 @@ void init_sample_buffers(size_t max_buffer_size, size_t samp_size);
 char *get_sample_buffer(size_t buffer_ptr, size_t *buffer_capacity);
 bool dequeue_samples(size_t &read_ptr);
 void write_samples_worker(const std::string &type, SampleWriter *sample_writer, boost::atomic<bool> *samples_input_done, boost::atomic<bool> *write_samples_worker_done, size_t nfft, size_t nfft_overlap, size_t nfft_div, size_t nfft_ds, size_t rate);
+void sample_pipeline_start();
+void sample_pipeline_stop();
