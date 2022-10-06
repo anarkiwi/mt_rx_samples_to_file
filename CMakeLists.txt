@@ -8,11 +8,12 @@ cmake_minimum_required(VERSION 3.16)
 project(mt_rx_samples_to_file)
 set(CMAKE_BUILD_TYPE Release)
 include(FindPkgConfig)
+include(CTest)
 
 find_package(Vulkan REQUIRED)
 find_package(Armadillo REQUIRED)
 find_package(UHD 3.15.0 REQUIRED)
-find_package(Boost ${Boost_Version} COMPONENTS iostreams thread program_options filesystem REQUIRED)
+find_package(Boost ${Boost_Version} COMPONENTS filesystem iostreams thread unit_test_framework program_options REQUIRED)
 
 add_library(vkfft vkfft.cpp)
 target_link_libraries(vkfft ${CMAKE_CURRENT_SOURCE_DIR}/VkFFT/build/glslang-master/glslang/libglslang.a ${ARMADILLO_LIBRARIES} ${UHD_LIBRARIES} ${Boost_LIBRARIES} ${Vulkan_LIBRARIES} ${CMAKE_CURRENT_SOURCE_DIR}/VkFFT/build/glslang-master/glslang/libMachineIndependent.a ${CMAKE_CURRENT_SOURCE_DIR}/VkFFT/build/glslang-master/glslang/OSDependent/Unix/libOSDependent.a ${CMAKE_CURRENT_SOURCE_DIR}/VkFFT/build/glslang-master/OGLCompilersDLL/libOGLCompiler.a ${CMAKE_CURRENT_SOURCE_DIR}/VkFFT/build/glslang-master/glslang/libGenericCodeGen.a ${CMAKE_CURRENT_SOURCE_DIR}/VkFFT/build/glslang-master/SPIRV/libSPIRV.a ${CMAKE_CURRENT_SOURCE_DIR}/VkFFT/build/CMakeFiles/Vulkan_FFT.dir/benchmark_scripts/vkFFT_scripts/src/utils_VkFFT.cpp.o)
@@ -25,3 +26,8 @@ target_link_libraries(sample_pipeline vkfft)
 
 add_executable(mt_rx_samples_to_file mt_rx_samples_to_file.cpp)
 target_link_libraries(mt_rx_samples_to_file sample_writer sample_pipeline)
+
+add_executable(sample_pipeline_test sample_pipeline_test.cpp)
+target_link_libraries(sample_pipeline_test ${Boost_UNIT_TEST_FRAMEWORK_LIBRARY})
+
+add_test(NAME sample_pipeline_test COMMAND sample_pipeline_test)
