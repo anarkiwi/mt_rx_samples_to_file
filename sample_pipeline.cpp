@@ -152,3 +152,58 @@ void fft_out_offload(SampleWriter *fft_sample_writer, arma::cx_fmat &Pw) {
     arma::fmat fft_points_out = log10(real(Pw % conj(Pw))) * 10;
     fft_sample_writer->write((const char*)fft_points_out.memptr(), fft_points_out.n_elem * sizeof(float));
 }
+
+
+template <typename samp_type>
+void write_samples(SampleWriter *sample_writer, size_t &fft_write_ptr, arma::cx_fvec &fft_samples_in, size_t &curr_nfft_ds, size_t nfft, size_t nfft_overlap, size_t nfft_ds)
+{
+    size_t read_ptr;
+    size_t buffer_capacity = 0;
+    while (dequeue_samples(read_ptr)) {
+        char *buffer_p = get_sample_buffer(read_ptr, &buffer_capacity);
+        if (nfft) {
+            samp_type *i_p = (samp_type*)buffer_p;
+            for (size_t i = 0; i < buffer_capacity / (fft_samples_in.size() * sizeof(samp_type)); ++i) {
+                for (size_t fft_p = 0; fft_p < fft_samples_in.size(); ++fft_p, ++i_p) {
+                    fft_samples_in[fft_p] = std::complex<float>(i_p->real(), i_p->imag());
+                }
+                if (++curr_nfft_ds == nfft_ds) {
+                    curr_nfft_ds = 0;
+                    queue_fft(fft_samples_in, fft_write_ptr, nfft, nfft_overlap);
+                }
+            }
+        }
+        sample_writer->write(buffer_p, buffer_capacity);
+        std::cout << "." << std::endl;
+    }
+}
+
+
+void wrap_write_samples(const std::string &type, SampleWriter *sample_writer, size_t &fft_write_ptr, arma::cx_fvec &fft_samples_in, size_t &curr_nfft_ds, size_t nfft, size_t nfft_overlap, size_t nfft_ds)
+{
+    if (type == "double")
+        write_samples<std::complex<double>>(sample_writer, fft_write_ptr, fft_samples_in, curr_nfft_ds, nfft, nfft_overlap, nfft_ds);
+    else if (type == "float")
+        write_samples<std::complex<float>>(sample_writer, fft_write_ptr, fft_samples_in, curr_nfft_ds, nfft, nfft_overlap, nfft_ds);
+    else if (type == "short")
+        write_samples<std::complex<short>>(sample_writer, fft_write_ptr, fft_samples_in, curr_nfft_ds, nfft, nfft_overlap, nfft_ds);
+    else
+        throw std::runtime_error("Unknown type " + type);
+}
+
+
+void write_samples_worker(const std::string &type, SampleWriter *sample_writer, boost::atomic<bool> *samples_input_done, boost::atomic<bool> *write_samples_worker_done, size_t nfft, size_t nfft_overlap, size_t nfft_div, size_t nfft_ds, size_t rate)
+{
+    size_t fft_write_ptr = 0;
+    size_t curr_nfft_ds = 0;
+    arma::cx_fvec fft_samples_in(rate / nfft_div);
+
+    while (!*samples_input_done) {
+        wrap_write_samples(type, sample_writer, fft_write_ptr, fft_samples_in, curr_nfft_ds, nfft, nfft_overlap, nfft_ds);
+        usleep(10000);
+    }
+
+    wrap_write_samples(type, sample_writer, fft_write_ptr, fft_samples_in, curr_nfft_ds, nfft, nfft_overlap, nfft_ds);
+    *write_samples_worker_done = true;
+    std::cout << "write samples worker done" << std::endl;
+}

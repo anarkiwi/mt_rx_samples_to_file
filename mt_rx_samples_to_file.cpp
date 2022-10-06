@@ -31,48 +31,6 @@ namespace po = boost::program_options;
 static size_t nfft = 0, nfft_overlap = 0, nfft_div = 0, nfft_ds = 0, rate = 0;
 
 
-template <typename samp_type>
-inline void write_samples(SampleWriter *sample_writer, size_t &fft_write_ptr, arma::cx_fvec &fft_samples_in, size_t &curr_nfft_ds)
-{
-    size_t read_ptr;
-    size_t buffer_capacity = 0;
-    while (dequeue_samples(read_ptr)) {
-	char *buffer_p = get_sample_buffer(read_ptr, &buffer_capacity);
-	if (nfft) {
-	    samp_type *i_p = (samp_type*)buffer_p;
-	    for (size_t i = 0; i < buffer_capacity / (fft_samples_in.size() * sizeof(samp_type)); ++i) {
-		for (size_t fft_p = 0; fft_p < fft_samples_in.size(); ++fft_p, ++i_p) {
-		    fft_samples_in[fft_p] = std::complex<float>(i_p->real(), i_p->imag());
-		}
-		if (++curr_nfft_ds == nfft_ds) {
-		    curr_nfft_ds = 0;
-		    queue_fft(fft_samples_in, fft_write_ptr, nfft, nfft_overlap);
-		}
-	    }
-	}
-	sample_writer->write(buffer_p, buffer_capacity);
-	std::cout << "." << std::endl;
-    }
-}
-
-
-template <typename samp_type>
-void write_samples_worker(SampleWriter *sample_writer, boost::atomic<bool> *samples_input_done, boost::atomic<bool> *write_samples_worker_done)
-{
-    size_t fft_write_ptr = 0;
-    size_t curr_nfft_ds = 0;
-    arma::cx_fvec fft_samples_in(rate / nfft_div);
-
-    while (!*samples_input_done) {
-	write_samples<samp_type>(sample_writer, fft_write_ptr, fft_samples_in, curr_nfft_ds);
-	usleep(10000);
-    }
-    write_samples<samp_type>(sample_writer, fft_write_ptr, fft_samples_in, curr_nfft_ds);
-    *write_samples_worker_done = true;
-    std::cout << "write samples worker done" << std::endl;
-}
-
-
 static bool stop_signal_called = false;
 void sig_int_handler(int)
 {
@@ -82,6 +40,7 @@ void sig_int_handler(int)
 
 template <typename samp_type>
 void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
+    const std::string& type,
     const std::string& cpu_format,
     const std::string& wire_format,
     const size_t& channel,
@@ -156,7 +115,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     static boost::atomic<bool> fft_in_worker_done(false);
 
     boost::thread_group writer_threads;
-    writer_threads.add_thread(new boost::thread(write_samples_worker<samp_type>, sample_writer.get(), &samples_input_done, &write_samples_worker_done));
+    writer_threads.add_thread(new boost::thread(write_samples_worker, type, sample_writer.get(), &samples_input_done, &write_samples_worker_done, nfft, nfft_overlap, nfft_div, nfft_ds, rate));
     writer_threads.add_thread(new boost::thread(fft_in_worker, useVkFFT, &write_samples_worker_done, &fft_in_worker_done));
     writer_threads.add_thread(new boost::thread(fft_out_worker, fft_sample_writer.get(), &fft_in_worker_done));
 
@@ -523,6 +482,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 
 #define recv_to_file_args(format) \
     (usrp,                        \
+        type,                     \
 	format,                   \
 	wirefmt,                  \
 	channel,                  \
