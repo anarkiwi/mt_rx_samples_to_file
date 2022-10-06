@@ -11,8 +11,6 @@
 #include <uhd/utils/safe_main.hpp>
 #include <uhd/utils/thread.hpp>
 #include <boost/program_options.hpp>
-#include <boost/thread/thread.hpp>
-#include <boost/scoped_ptr.hpp>
 #include <cstdio>
 #include <cstdlib>
 #include <chrono>
@@ -21,56 +19,12 @@
 #include <iostream>
 #include <thread>
 
-#include "sigpack/sigpack.h"
-#include "sample_writer.h"
 #include "sample_pipeline.h"
-#include "vkfft.h"
+#include "sample_writer.h"
 
 namespace po = boost::program_options;
 
-static size_t nfft = 0, nfft_overlap = 0, nfft_div = 0, nfft_ds = 0, rate = 0;
-static size_t curr_nfft_ds = 0;
-
-
-template <typename samp_type>
-inline void write_samples(SampleWriter *sample_writer, size_t &fft_write_ptr, arma::cx_fvec &fft_samples_in)
-{
-    size_t read_ptr;
-    size_t buffer_capacity = 0;
-    while (dequeue_samples(read_ptr)) {
-	char *buffer_p = get_sample_buffer(read_ptr, &buffer_capacity);
-	if (nfft) {
-	    samp_type *i_p = (samp_type*)buffer_p;
-	    for (size_t i = 0; i < buffer_capacity / (fft_samples_in.size() * sizeof(samp_type)); ++i) {
-		for (size_t fft_p = 0; fft_p < fft_samples_in.size(); ++fft_p, ++i_p) {
-		    fft_samples_in[fft_p] = std::complex<float>(i_p->real(), i_p->imag());
-		}
-		if (++curr_nfft_ds == nfft_ds) {
-		    curr_nfft_ds = 0;
-		    queue_fft(fft_samples_in, fft_write_ptr, nfft, nfft_overlap);
-		}
-	    }
-	}
-	sample_writer->write(buffer_p, buffer_capacity);
-	std::cout << "." << std::endl;
-    }
-}
-
-
-template <typename samp_type>
-void write_samples_worker(SampleWriter *sample_writer, boost::atomic<bool> *samples_input_done, boost::atomic<bool> *write_samples_worker_done)
-{
-    size_t fft_write_ptr = 0;
-    arma::cx_fvec fft_samples_in(rate / nfft_div);
-
-    while (!*samples_input_done) {
-	write_samples<samp_type>(sample_writer, fft_write_ptr, fft_samples_in);
-	usleep(10000);
-    }
-    write_samples<samp_type>(sample_writer, fft_write_ptr, fft_samples_in);
-    *write_samples_worker_done = true;
-    std::cout << "write samples worker done" << std::endl;
-}
+static size_t nfft = 0, nfft_overlap = 0, nfft_div = 0, nfft_ds = 0, rate = 0, batches = 0, sample_id = 0;
 
 
 static bool stop_signal_called = false;
@@ -82,10 +36,11 @@ void sig_int_handler(int)
 
 template <typename samp_type>
 void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
+    const std::string& type,
     const std::string& cpu_format,
     const std::string& wire_format,
     const size_t& channel,
-    const std::string& file,
+    const std::string& file_arg,
     const std::string& fft_file_arg,
     size_t samps_per_buff,
     size_t zlevel,
@@ -120,19 +75,19 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 
     uhd::rx_metadata_t md;
 
+    std::string file = file_arg;
     std::string fft_file = get_prefix_file(file, "fft_");
 
     if (fft_file_arg.size()) {
 	fft_file = fft_file_arg;
     }
 
-    init_sample_buffers(max_buffer_size, sizeof(samp_type));
+    if (null) {
+        file.clear();
+    }
 
-    boost::scoped_ptr<SampleWriter> sample_writer(new SampleWriter());
-    boost::scoped_ptr<SampleWriter> fft_sample_writer(new SampleWriter());
-
-    if (not null) {
-	sample_writer->open(file, zlevel);
+    if (fftnull) {
+        fft_file.clear();
     }
 
     if (nfft) {
@@ -145,20 +100,10 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 	if (rate % nfft_div) {
 	    throw std::runtime_error("nfft_div must be a factor of sample rate");
 	}
-
-	if (not fftnull) {
-	    fft_sample_writer->open(fft_file, zlevel);
-	}
     }
 
-    static boost::atomic<bool> samples_input_done(false);
-    static boost::atomic<bool> write_samples_worker_done(false);
-    static boost::atomic<bool> fft_in_worker_done(false);
-
-    boost::thread_group writer_threads;
-    writer_threads.add_thread(new boost::thread(write_samples_worker<samp_type>, sample_writer.get(), &samples_input_done, &write_samples_worker_done));
-    writer_threads.add_thread(new boost::thread(fft_in_worker, useVkFFT, &write_samples_worker_done, &fft_in_worker_done));
-    writer_threads.add_thread(new boost::thread(fft_out_worker, fft_sample_writer.get(), &fft_in_worker_done));
+    init_sample_buffers(max_buffer_size, sizeof(samp_type));
+    sample_pipeline_start(type, file, fft_file, zlevel, useVkFFT, nfft, nfft_overlap, nfft_div, nfft_ds, rate, batches, sample_id);
 
     bool overflow_message = true;
     size_t overflows = 0;
@@ -176,7 +121,6 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     const auto start_time = std::chrono::steady_clock::now();
 
     rx_stream->issue_stream_cmd(stream_cmd);
-
     const auto stop_time =
 	start_time + std::chrono::milliseconds(int64_t(1000 * time_requested));
     // Track time and samps between updating the BW summary
@@ -254,18 +198,12 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 	    }
 	}
     }
-    samples_input_done = true;
+
     const auto actual_stop_time = std::chrono::steady_clock::now();
     stream_cmd.stream_mode = uhd::stream_cmd_t::STREAM_MODE_STOP_CONTINUOUS;
     rx_stream->issue_stream_cmd(stream_cmd);
     std::cout << "stream stopped" << std::endl;
-
-    writer_threads.join_all();
-
-    sample_writer->close(overflows);
-    fft_sample_writer->close(overflows);
-
-    std::cout << "closed" << std::endl;
+    sample_pipeline_stop(overflows);
 
     if (stats) {
 	std::cout << std::endl;
@@ -335,7 +273,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 {
     // variables to be set by po
     std::string args, file, fft_file, type, ant, subdev, ref, wirefmt;
-    size_t channel, total_num_samps, spb, zlevel, batches, sample_id;
+    size_t channel, total_num_samps, spb, zlevel;
     double option_rate, freq, gain, bw, total_time, setup_time, lo_offset;
 
     // setup the program options
@@ -413,16 +351,6 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 	return ~0;
     }
     rate = size_t(option_rate);
-
-    if (nfft) {
-	if (useVkFFT) {
-	    if (init_vkfft(batches, sample_id, nfft)) {
-		std::cout << "init_vkfft() failed" << std::endl;
-		return -0;
-	    }
-	}
-	init_hamming_window(nfft);
-    }
 
     // create a usrp device
     std::cout << std::endl;
@@ -523,6 +451,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 
 #define recv_to_file_args(format) \
     (usrp,                        \
+        type,                     \
 	format,                   \
 	wirefmt,                  \
 	channel,                  \
@@ -552,12 +481,6 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 	recv_to_file<std::complex<short>> recv_to_file_args("sc16");
     else
 	throw std::runtime_error("Unknown type " + type);
-
-    if (nfft) {
-       if (useVkFFT) {
-	   free_vkfft();
-       }
-    }
 
     // finished
     std::cout << std::endl << "Done!" << std::endl << std::endl;

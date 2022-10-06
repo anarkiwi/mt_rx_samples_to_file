@@ -1,4 +1,15 @@
+#include <boost/atomic.hpp>
+#include <boost/lockfree/spsc_queue.hpp>
+#include <boost/scoped_ptr.hpp>
+#include <boost/thread/thread.hpp>
+
+#include "sigpack/sigpack.h"
+
 #include "sample_pipeline.h"
+#include "sample_writer.h"
+#include "vkfft.h"
+
+typedef void (*offload_p)(arma::cx_fmat&, arma::cx_fmat&);
 
 const size_t kSampleBuffers = 8;
 const size_t kFFTbuffers = 256;
@@ -6,11 +17,22 @@ const size_t kFFTbuffers = 256;
 static arma::fvec hammingWindow;
 static float hammingWindowSum = 0;
 
+static size_t nfft = 0, nfft_overlap = 0,  nfft_ds = 0;
+static bool useVkFFT = false;
+static offload_p offload;
+
 static std::pair<arma::cx_fmat, arma::cx_fmat> FFTBuffers[kFFTbuffers];
 boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbuffers>> in_fft_queue;
 boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbuffers>> out_fft_queue;
 static std::pair<boost::scoped_ptr<char>, size_t> sampleBuffers[kSampleBuffers];
 boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kSampleBuffers>> sample_queue;
+static arma::cx_fvec fft_samples_in;
+static boost::atomic<bool> samples_input_done(false);
+static boost::atomic<bool> write_samples_worker_done(false);
+static boost::atomic<bool> fft_in_worker_done(false);
+boost::scoped_ptr<SampleWriter> sample_writer;
+boost::scoped_ptr<SampleWriter> fft_sample_writer;
+boost::thread_group writer_threads;
 
 
 void enqueue_samples(size_t &buffer_ptr) {
@@ -51,10 +73,6 @@ bool dequeue_samples(size_t &read_ptr) {
 }
 
 
-
-typedef void (*offload_p)(arma::cx_fmat&, arma::cx_fmat&);
-
-
 void specgram_offload(arma::cx_fmat &Pw_in, arma::cx_fmat &Pw) {
     const size_t nfft_rows = Pw_in.n_rows;
 
@@ -65,7 +83,7 @@ void specgram_offload(arma::cx_fmat &Pw_in, arma::cx_fmat &Pw) {
 }
 
 
-inline void fftin(offload_p offload) {
+inline void fftin() {
     size_t read_ptr;
     while (in_fft_queue.pop(read_ptr)) {
 	offload(FFTBuffers[read_ptr].first, FFTBuffers[read_ptr].second);
@@ -76,44 +94,47 @@ inline void fftin(offload_p offload) {
 }
 
 
-void fft_in_worker(bool useVkFFT, boost::atomic<bool> *write_samples_worker_done, boost::atomic<bool> *fft_in_worker_done)
+void fft_in_worker()
 {
-    offload_p offload = specgram_offload;
-    if (useVkFFT) {
-	offload = vkfft_specgram_offload;
-    }
-    while (!*write_samples_worker_done) {
-	fftin(offload);
+    while (!write_samples_worker_done) {
+	fftin();
 	usleep(10000);
     }
-    fftin(offload);
-    *fft_in_worker_done = true;
+    fftin();
+    fft_in_worker_done = true;
     std::cout << "fft worker done" << std::endl;
 }
 
 
-void fftout(SampleWriter *fft_sample_writer) {
+void fft_out_offload(const arma::cx_fmat &Pw) {
+    // TODO: offload C2R
+    arma::fmat fft_points_out = log10(real(Pw % conj(Pw / hammingWindowSum))) * 10;
+    fft_sample_writer->write((const char*)fft_points_out.memptr(), fft_points_out.n_elem * sizeof(float));
+}
+
+
+void fftout() {
     size_t read_ptr;
     while (out_fft_queue.pop(read_ptr)) {
-	fft_out_offload(fft_sample_writer, FFTBuffers[read_ptr].second);
+	fft_out_offload(FFTBuffers[read_ptr].second);
     }
 }
 
 
-void fft_out_worker(SampleWriter *fft_sample_writer, boost::atomic<bool> *fft_in_worker_done)
+void fft_out_worker()
 {
-    while (!*fft_in_worker_done) {
-	fftout(fft_sample_writer);
+    while (!fft_in_worker_done) {
+	fftout();
 	usleep(10000);
     }
-    fftout(fft_sample_writer);
+    fftout();
     std::cout << "fft out worker done" << std::endl;
 }
 
 
-void specgram_window(const arma::cx_fvec& x, arma::cx_fmat &Pw_in, const arma::uword Nfft, const arma::uword Noverl)
+void specgram_window(arma::cx_fmat &Pw_in, const arma::uword Nfft, const arma::uword Noverl)
 {
-    arma::uword N = x.size();
+    arma::uword N = fft_samples_in.size();
     arma::uword D = Nfft-Noverl;
     arma::uword m = 0;
     const arma::uword U = static_cast<arma::uword>(floor((N-Noverl)/double(D)));
@@ -121,14 +142,14 @@ void specgram_window(const arma::cx_fvec& x, arma::cx_fmat &Pw_in, const arma::u
 
     for(arma::uword k=0; k<=N-Nfft; k+=D)
     {
-	Pw_in.col(m++) = x.rows(k,k+Nfft-1) % hammingWindow;
+	Pw_in.col(m++) = fft_samples_in.rows(k,k+Nfft-1) % hammingWindow;
     }
 }
 
 
-void queue_fft(const arma::cx_fvec &fft_samples_in, size_t &fft_write_ptr, size_t nfft, size_t nfft_overlap) {
+void queue_fft(size_t &fft_write_ptr) {
     arma::cx_fmat &Pw_in = FFTBuffers[fft_write_ptr].first;
-    specgram_window(fft_samples_in, Pw_in, nfft, nfft_overlap);
+    specgram_window(Pw_in, nfft, nfft_overlap);
     arma::cx_fmat &Pw = FFTBuffers[fft_write_ptr].second;
     Pw.copy_size(Pw_in);
     while (!in_fft_queue.push(fft_write_ptr)) {
@@ -146,9 +167,96 @@ void init_hamming_window(size_t nfft) {
 }
 
 
-void fft_out_offload(SampleWriter *fft_sample_writer, arma::cx_fmat &Pw) {
-    Pw /= hammingWindowSum;
-    // TODO: offload C2R
-    arma::fmat fft_points_out = log10(real(Pw % conj(Pw))) * 10;
-    fft_sample_writer->write((const char*)fft_points_out.memptr(), fft_points_out.n_elem * sizeof(float));
+template <typename samp_type>
+void write_samples(size_t &fft_write_ptr, size_t &curr_nfft_ds)
+{
+    size_t read_ptr;
+    size_t buffer_capacity = 0;
+    while (dequeue_samples(read_ptr)) {
+        char *buffer_p = get_sample_buffer(read_ptr, &buffer_capacity);
+        if (nfft) {
+            samp_type *i_p = (samp_type*)buffer_p;
+            for (size_t i = 0; i < buffer_capacity / (fft_samples_in.size() * sizeof(samp_type)); ++i) {
+                for (size_t fft_p = 0; fft_p < fft_samples_in.size(); ++fft_p, ++i_p) {
+                    fft_samples_in[fft_p] = std::complex<float>(i_p->real(), i_p->imag());
+                }
+                if (++curr_nfft_ds == nfft_ds) {
+                    curr_nfft_ds = 0;
+                    queue_fft(fft_write_ptr);
+                }
+            }
+        }
+        sample_writer->write(buffer_p, buffer_capacity);
+        std::cout << "." << std::endl;
+    }
+}
+
+
+void wrap_write_samples(const std::string &type, size_t &fft_write_ptr, size_t &curr_nfft_ds)
+{
+    if (type == "double")
+        write_samples<std::complex<double>>(fft_write_ptr, curr_nfft_ds);
+    else if (type == "float")
+        write_samples<std::complex<float>>(fft_write_ptr, curr_nfft_ds);
+    else if (type == "short")
+        write_samples<std::complex<short>>(fft_write_ptr, curr_nfft_ds);
+    else
+        throw std::runtime_error("Unknown type " + type);
+}
+
+
+void write_samples_worker(const std::string &type)
+{
+    size_t fft_write_ptr = 0;
+    size_t curr_nfft_ds = 0;
+
+    while (!samples_input_done) {
+        wrap_write_samples(type, fft_write_ptr, curr_nfft_ds);
+        usleep(10000);
+    }
+
+    wrap_write_samples(type, fft_write_ptr, curr_nfft_ds);
+    write_samples_worker_done = true;
+    std::cout << "write samples worker done" << std::endl;
+}
+
+
+void sample_pipeline_start(const std::string &type, const std::string &file, const std::string &fft_file, size_t zlevel, bool useVkFFT_, size_t nfft_, size_t nfft_overlap_, size_t nfft_div, size_t nfft_ds_, size_t rate, size_t batches, size_t sample_id) {
+    nfft = nfft_;
+    nfft_overlap_ = nfft_overlap_;
+    nfft_ds = nfft_ds_;
+    useVkFFT = useVkFFT_;
+
+    offload = specgram_offload;
+    if (useVkFFT) {
+        offload = vkfft_specgram_offload;
+        init_vkfft(batches, sample_id, nfft);
+    }
+    init_hamming_window(nfft);
+    fft_samples_in.set_size(rate / nfft_div); 
+    samples_input_done = false;
+    write_samples_worker_done = false;
+    fft_in_worker_done = false;
+    sample_writer.reset(new SampleWriter());
+    fft_sample_writer.reset(new SampleWriter());
+    if (file.size()) {
+        sample_writer->open(file, zlevel);
+    }
+    if (fft_file.size()) {
+        fft_sample_writer->open(fft_file, zlevel);
+    }
+    writer_threads.add_thread(new boost::thread(write_samples_worker, type));
+    writer_threads.add_thread(new boost::thread(fft_in_worker));
+    writer_threads.add_thread(new boost::thread(fft_out_worker));
+}
+
+
+void sample_pipeline_stop(size_t overflows) {
+    samples_input_done = true;
+    writer_threads.join_all();
+    sample_writer->close(overflows);
+    fft_sample_writer->close(overflows);
+    if (useVkFFT) {
+        free_vkfft();
+    }
 }
