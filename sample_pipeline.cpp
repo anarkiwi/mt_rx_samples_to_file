@@ -12,6 +12,9 @@ boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbuffers>> out_
 static std::pair<boost::scoped_ptr<char>, size_t> sampleBuffers[kSampleBuffers];
 boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kSampleBuffers>> sample_queue;
 static arma::cx_fvec fft_samples_in;
+static boost::atomic<bool> samples_input_done(false);
+static boost::atomic<bool> write_samples_worker_done(false);
+static boost::atomic<bool> fft_in_worker_done(false);
 
 
 void enqueue_samples(size_t &buffer_ptr) {
@@ -77,18 +80,18 @@ inline void fftin(offload_p offload) {
 }
 
 
-void fft_in_worker(bool useVkFFT, boost::atomic<bool> *write_samples_worker_done, boost::atomic<bool> *fft_in_worker_done)
+void fft_in_worker(bool useVkFFT)
 {
     offload_p offload = specgram_offload;
     if (useVkFFT) {
 	offload = vkfft_specgram_offload;
     }
-    while (!*write_samples_worker_done) {
+    while (!write_samples_worker_done) {
 	fftin(offload);
 	usleep(10000);
     }
     fftin(offload);
-    *fft_in_worker_done = true;
+    fft_in_worker_done = true;
     std::cout << "fft worker done" << std::endl;
 }
 
@@ -101,9 +104,9 @@ void fftout(SampleWriter *fft_sample_writer) {
 }
 
 
-void fft_out_worker(SampleWriter *fft_sample_writer, boost::atomic<bool> *fft_in_worker_done)
+void fft_out_worker(SampleWriter *fft_sample_writer)
 {
-    while (!*fft_in_worker_done) {
+    while (!fft_in_worker_done) {
 	fftout(fft_sample_writer);
 	usleep(10000);
     }
@@ -193,28 +196,30 @@ void wrap_write_samples(const std::string &type, SampleWriter *sample_writer, si
 }
 
 
-void write_samples_worker(const std::string &type, SampleWriter *sample_writer, boost::atomic<bool> *samples_input_done, boost::atomic<bool> *write_samples_worker_done, size_t nfft, size_t nfft_overlap, size_t nfft_div, size_t nfft_ds, size_t rate)
+void write_samples_worker(const std::string &type, SampleWriter *sample_writer, size_t nfft, size_t nfft_overlap, size_t nfft_div, size_t nfft_ds, size_t rate)
 {
     size_t fft_write_ptr = 0;
     size_t curr_nfft_ds = 0;
     fft_samples_in.set_size(rate / nfft_div);
 
-    while (!*samples_input_done) {
+    while (!samples_input_done) {
         wrap_write_samples(type, sample_writer, fft_write_ptr, curr_nfft_ds, nfft, nfft_overlap, nfft_ds);
         usleep(10000);
     }
 
     wrap_write_samples(type, sample_writer, fft_write_ptr, curr_nfft_ds, nfft, nfft_overlap, nfft_ds);
-    *write_samples_worker_done = true;
+    write_samples_worker_done = true;
     std::cout << "write samples worker done" << std::endl;
 }
 
 
 void sample_pipeline_start() {
-
+    samples_input_done = false;
+    write_samples_worker_done = false;
+    fft_in_worker_done = false;
 }
 
 
 void sample_pipeline_stop() {
-
+    samples_input_done = true;
 }

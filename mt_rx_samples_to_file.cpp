@@ -110,14 +110,12 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 	}
     }
 
-    static boost::atomic<bool> samples_input_done(false);
-    static boost::atomic<bool> write_samples_worker_done(false);
-    static boost::atomic<bool> fft_in_worker_done(false);
+    sample_pipeline_start();
 
     boost::thread_group writer_threads;
-    writer_threads.add_thread(new boost::thread(write_samples_worker, type, sample_writer.get(), &samples_input_done, &write_samples_worker_done, nfft, nfft_overlap, nfft_div, nfft_ds, rate));
-    writer_threads.add_thread(new boost::thread(fft_in_worker, useVkFFT, &write_samples_worker_done, &fft_in_worker_done));
-    writer_threads.add_thread(new boost::thread(fft_out_worker, fft_sample_writer.get(), &fft_in_worker_done));
+    writer_threads.add_thread(new boost::thread(write_samples_worker, type, sample_writer.get(), nfft, nfft_overlap, nfft_div, nfft_ds, rate));
+    writer_threads.add_thread(new boost::thread(fft_in_worker, useVkFFT));
+    writer_threads.add_thread(new boost::thread(fft_out_worker, fft_sample_writer.get()));
 
     bool overflow_message = true;
     size_t overflows = 0;
@@ -213,7 +211,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 	    }
 	}
     }
-    samples_input_done = true;
+    sample_pipeline_stop();
     const auto actual_stop_time = std::chrono::steady_clock::now();
     stream_cmd.stream_mode = uhd::stream_cmd_t::STREAM_MODE_STOP_CONTINUOUS;
     rx_stream->issue_stream_cmd(stream_cmd);
