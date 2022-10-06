@@ -211,12 +211,13 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 	    }
 	}
     }
-    sample_pipeline_stop();
+
     const auto actual_stop_time = std::chrono::steady_clock::now();
     stream_cmd.stream_mode = uhd::stream_cmd_t::STREAM_MODE_STOP_CONTINUOUS;
     rx_stream->issue_stream_cmd(stream_cmd);
     std::cout << "stream stopped" << std::endl;
 
+    sample_pipeline_stop();
     writer_threads.join_all();
 
     sample_writer->close(overflows);
