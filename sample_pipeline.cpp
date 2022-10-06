@@ -3,8 +3,11 @@
 #include <boost/scoped_ptr.hpp>
 #include <boost/thread/thread.hpp>
 
+#include "sigpack/sigpack.h"
+
 #include "sample_pipeline.h"
 #include "sample_writer.h"
+#include "vkfft.h"
 
 typedef void (*offload_p)(arma::cx_fmat&, arma::cx_fmat&);
 
@@ -144,7 +147,7 @@ void specgram_window(arma::cx_fmat &Pw_in, const arma::uword Nfft, const arma::u
 }
 
 
-void queue_fft(size_t &fft_write_ptr, size_t nfft, size_t nfft_overlap) {
+void queue_fft(size_t &fft_write_ptr) {
     arma::cx_fmat &Pw_in = FFTBuffers[fft_write_ptr].first;
     specgram_window(Pw_in, nfft, nfft_overlap);
     arma::cx_fmat &Pw = FFTBuffers[fft_write_ptr].second;
@@ -179,7 +182,7 @@ void write_samples(size_t &fft_write_ptr, size_t &curr_nfft_ds)
                 }
                 if (++curr_nfft_ds == nfft_ds) {
                     curr_nfft_ds = 0;
-                    queue_fft(fft_write_ptr, nfft, nfft_overlap);
+                    queue_fft(fft_write_ptr);
                 }
             }
         }

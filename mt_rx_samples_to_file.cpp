@@ -20,6 +20,7 @@
 #include <thread>
 
 #include "sample_pipeline.h"
+#include "sample_writer.h"
 
 namespace po = boost::program_options;
 
