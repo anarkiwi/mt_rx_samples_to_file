@@ -11,8 +11,6 @@
 #include <uhd/utils/safe_main.hpp>
 #include <uhd/utils/thread.hpp>
 #include <boost/program_options.hpp>
-#include <boost/thread/thread.hpp>
-#include <boost/scoped_ptr.hpp>
 #include <cstdio>
 #include <cstdlib>
 #include <chrono>
@@ -21,8 +19,6 @@
 #include <iostream>
 #include <thread>
 
-#include "sigpack/sigpack.h"
-#include "sample_writer.h"
 #include "sample_pipeline.h"
 #include "vkfft.h"
 
@@ -44,7 +40,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     const std::string& cpu_format,
     const std::string& wire_format,
     const size_t& channel,
-    const std::string& file,
+    const std::string& file_arg,
     const std::string& fft_file_arg,
     size_t samps_per_buff,
     size_t zlevel,
@@ -79,20 +75,22 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 
     uhd::rx_metadata_t md;
 
+    std::string file = file_arg;
     std::string fft_file = get_prefix_file(file, "fft_");
 
     if (fft_file_arg.size()) {
 	fft_file = fft_file_arg;
     }
 
-    init_sample_buffers(max_buffer_size, sizeof(samp_type));
-
-    boost::scoped_ptr<SampleWriter> sample_writer(new SampleWriter());
-    boost::scoped_ptr<SampleWriter> fft_sample_writer(new SampleWriter());
-
-    if (not null) {
-	sample_writer->open(file, zlevel);
+    if (null) {
+        file.clear();
     }
+
+    if (fftnull) {
+        fft_file.clear();
+    }
+
+    init_sample_buffers(max_buffer_size, sizeof(samp_type));
 
     if (nfft) {
 	std::cout << "using FFT point size " << nfft << std::endl;
@@ -104,18 +102,9 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 	if (rate % nfft_div) {
 	    throw std::runtime_error("nfft_div must be a factor of sample rate");
 	}
-
-	if (not fftnull) {
-	    fft_sample_writer->open(fft_file, zlevel);
-	}
     }
 
-    sample_pipeline_start();
-
-    boost::thread_group writer_threads;
-    writer_threads.add_thread(new boost::thread(write_samples_worker, type, sample_writer.get(), nfft, nfft_overlap, nfft_div, nfft_ds, rate));
-    writer_threads.add_thread(new boost::thread(fft_in_worker, useVkFFT));
-    writer_threads.add_thread(new boost::thread(fft_out_worker, fft_sample_writer.get()));
+    sample_pipeline_start(type, file, fft_file, zlevel, useVkFFT, nfft, nfft_overlap, nfft_div, nfft_ds, rate);
 
     bool overflow_message = true;
     size_t overflows = 0;
@@ -217,13 +206,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     rx_stream->issue_stream_cmd(stream_cmd);
     std::cout << "stream stopped" << std::endl;
 
-    sample_pipeline_stop();
-    writer_threads.join_all();
-
-    sample_writer->close(overflows);
-    fft_sample_writer->close(overflows);
-
-    std::cout << "closed" << std::endl;
+    sample_pipeline_stop(overflows);
 
     if (stats) {
 	std::cout << std::endl;
