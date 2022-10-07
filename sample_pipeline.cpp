@@ -17,9 +17,10 @@ const size_t kFFTbuffers = 256;
 static arma::fvec hammingWindow;
 static float hammingWindowSum = 0;
 
-static size_t nfft = 0, nfft_overlap = 0,  nfft_ds = 0;
+static size_t nfft = 0, nfft_overlap = 0,  nfft_ds = 0, samp_size = 0;
 static bool useVkFFT = false;
 static offload_p offload;
+static void(*write_samples_p)(size_t &, size_t &);
 
 static std::pair<arma::cx_fmat, arma::cx_fmat> FFTBuffers[kFFTbuffers];
 boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbuffers>> in_fft_queue;
@@ -192,32 +193,23 @@ void write_samples(size_t &fft_write_ptr, size_t &curr_nfft_ds)
 }
 
 
-void wrap_write_samples(const std::string &type, size_t &fft_write_ptr, size_t &curr_nfft_ds)
-{
-    if (type == "double")
-	write_samples<std::complex<double>>(fft_write_ptr, curr_nfft_ds);
-    else if (type == "float")
-	write_samples<std::complex<float>>(fft_write_ptr, curr_nfft_ds);
-    else if (type == "short")
-	write_samples<std::complex<short>>(fft_write_ptr, curr_nfft_ds);
-    else
-	throw std::runtime_error("Unknown type " + type);
-}
-
-
-void write_samples_worker(const std::string &type)
+void write_samples_worker()
 {
     size_t fft_write_ptr = 0;
     size_t curr_nfft_ds = 0;
 
     while (!samples_input_done) {
-	wrap_write_samples(type, fft_write_ptr, curr_nfft_ds);
+	write_samples_p(fft_write_ptr, curr_nfft_ds);
 	usleep(10000);
     }
 
-    wrap_write_samples(type, fft_write_ptr, curr_nfft_ds);
+    write_samples_p(fft_write_ptr, curr_nfft_ds);
     write_samples_worker_done = true;
     std::cerr << "write samples worker done" << std::endl;
+}
+
+size_t get_samp_size() {
+    return samp_size;
 }
 
 
@@ -232,6 +224,18 @@ void sample_pipeline_start(const std::string &type, const std::string &file, con
 	offload = vkfft_specgram_offload;
 	init_vkfft(batches, sample_id, nfft);
     }
+    if (type == "double") {
+        write_samples_p = &write_samples<std::complex<double>>;
+        samp_size = sizeof(std::complex<double>>);
+    } else if (type == "float") { 
+        write_samples_p = &write_samples<std::complex<float>>;
+        samp_size = sizeof(std::complex<float>>);
+    } else if (type == "short")
+        write_samples_p = &write_samples<std::complex<short>>;
+        samp_size = sizeof(std::complex<short>);
+    } else {
+        throw std::runtime_error("Unknown type " + type);
+    }
     init_hamming_window(nfft);
     fft_samples_in.set_size(rate / nfft_div);
     samples_input_done = false;
@@ -245,7 +249,7 @@ void sample_pipeline_start(const std::string &type, const std::string &file, con
     if (fft_file.size()) {
 	fft_sample_writer->open(fft_file, zlevel);
     }
-    writer_threads.add_thread(new boost::thread(write_samples_worker, type));
+    writer_threads.add_thread(new boost::thread(write_samples_worker));
     writer_threads.add_thread(new boost::thread(fft_in_worker));
     writer_threads.add_thread(new boost::thread(fft_out_worker));
 }
