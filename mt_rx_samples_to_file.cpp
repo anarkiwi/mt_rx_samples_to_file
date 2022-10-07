@@ -296,6 +296,20 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
               << std::endl
               << std::endl;
 
+    // set the rf gain
+    if (vm.count("gain")) {
+        std::cerr << boost::format("Setting RX Gain: %f dB...") % gain << std::endl;
+        usrp->set_rx_gain(gain, channel);
+        std::cerr << boost::format("Actual RX Gain: %f dB...")
+                         % usrp->get_rx_gain(channel)
+                  << std::endl
+                  << std::endl;
+    }
+
+    // set the antenna
+    if (vm.count("ant"))
+       usrp->set_rx_antenna(ant, channel);
+
     // set the center frequency
     if (vm.count("freq")) { // with default of 0.0 this will always be true
         std::cerr << boost::format("Setting RX Freq: %f MHz...") % (freq / 1e6)
@@ -312,16 +326,6 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
                   << std::endl;
     }
 
-    // set the rf gain
-    if (vm.count("gain")) {
-        std::cerr << boost::format("Setting RX Gain: %f dB...") % gain << std::endl;
-        usrp->set_rx_gain(gain, channel);
-        std::cerr << boost::format("Actual RX Gain: %f dB...")
-                         % usrp->get_rx_gain(channel)
-                  << std::endl
-                  << std::endl;
-    }
-
     // set the IF filter bandwidth
     if (vm.count("bw")) {
         std::cerr << boost::format("Setting RX Bandwidth: %f MHz...") % (bw / 1e6)
@@ -331,10 +335,6 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
                          % (usrp->get_rx_bandwidth(channel) / 1e6)
                   << std::endl
                   << std::endl;
-
-    // set the antenna
-    if (vm.count("ant"))
-        usrp->set_rx_antenna(ant, channel);
     }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(int64_t(1000 * setup_time)));
