@@ -10,6 +10,7 @@
 #include <uhd/usrp/multi_usrp.hpp>
 #include <uhd/utils/safe_main.hpp>
 #include <uhd/utils/thread.hpp>
+#include <boost/algorithm/string/predicate.hpp>
 #include <boost/program_options.hpp>
 #include <cstdio>
 #include <cstdlib>
@@ -36,7 +37,6 @@ void sig_int_handler(int)
 
 void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     const std::string& type,
-    const std::string& cpu_format,
     const std::string& wire_format,
     const size_t& channel,
     const std::string& file,
@@ -48,17 +48,14 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     double time_requested       = 0.0,
     bool useVkFFT               = false)
 {
-    unsigned long long num_total_samps = 0;
+    std::string cpu_format;
+    set_sample_pipeline_types(type, cpu_format);
+
     uhd::stream_args_t stream_args(cpu_format, wire_format);
     std::vector<size_t> channel_nums;
     channel_nums.push_back(channel);
     stream_args.channels             = channel_nums;
     uhd::rx_streamer::sptr rx_stream = usrp->get_rx_stream(stream_args);
-
-    if (samps_per_buff == 0) {
-        samps_per_buff = rate;
-        std::cerr << "defaulting spb to rate (" << samps_per_buff << ")" << std::endl;
-    }
 
     const size_t max_samps_per_packet = rx_stream->get_max_num_samps();
     const size_t max_samples = std::max(max_samps_per_packet, samps_per_buff);
@@ -70,13 +67,9 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
         if (samps_per_buff % nfft) {
             throw std::runtime_error("FFT point size must be a factor of spb");
         }
-
-        if (rate % nfft_div) {
-            throw std::runtime_error("nfft_div must be a factor of sample rate");
-        }
     }
 
-    sample_pipeline_start(type, file, fft_file, max_samples, zlevel, useVkFFT, nfft, nfft_overlap, nfft_div, nfft_ds, rate, batches, sample_id);
+    sample_pipeline_start(file, fft_file, max_samples, zlevel, useVkFFT, nfft, nfft_overlap, nfft_div, nfft_ds, rate, batches, sample_id);
 
     // setup streaming
     uhd::stream_cmd_t stream_cmd((num_requested_samples == 0)
@@ -91,6 +84,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     size_t buffer_capacity = 0;
     bool overflow_message = true;
     size_t overflows = 0;
+    unsigned long long num_total_samps = 0;
 
     const auto stop_time =
         std::chrono::steady_clock::now() + std::chrono::milliseconds(int64_t(1000 * time_requested));
@@ -212,7 +206,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         ("channel", po::value<size_t>(&channel)->default_value(0), "which channel to use")
         ("bw", po::value<double>(&bw), "analog frontend filter bandwidth in Hz")
         ("ref", po::value<std::string>(&ref)->default_value("internal"), "reference source (internal, external, mimo)")
-        ("wirefmt", po::value<std::string>(&wirefmt)->default_value("sc16"), "wire format (sc8, sc16 or s16)")
+        ("wirefmt", po::value<std::string>(&wirefmt)->default_value("sc16"), "wire format (sc8, sc16)")
         ("setup", po::value<double>(&setup_time)->default_value(1.0), "seconds of setup time")
         ("null", "run without writing to file")
         ("fftnull", "run without writing to FFT file")
@@ -246,6 +240,24 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     bool fftnull                = vm.count("fftnull") > 0;
     bool useVkFFT               = vm.count("novkfft") == 0;
 
+    if (!boost::algorithm::starts_with(wirefmt, "sc")) {
+        throw std::runtime_error("non-complex type not supported");
+    }
+
+    if (option_rate <= 0.0) {
+        throw std::runtime_error("invalid sample rate");
+    }
+    rate = size_t(option_rate);
+
+    if (rate % nfft_div) {
+        throw std::runtime_error("nfft_div must be a factor of sample rate");
+    }
+
+    if (spb == 0) {
+        spb = rate;
+        std::cerr << "defaulting spb to rate (" << spb << ")" << std::endl;
+    }
+
     if (!fft_file.size()) {
         fft_file = get_prefix_file(file, "fft_");
     }
@@ -257,13 +269,6 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     if (fftnull) {
         fft_file.clear();
     }
-
-    // set the sample rate
-    if (option_rate <= 0.0) {
-        std::cerr << "Please specify a valid sample rate" << std::endl;
-        return ~0;
-    }
-    rate = size_t(option_rate);
 
     // create a usrp device
     std::cerr << std::endl;
@@ -362,36 +367,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         std::cerr << "Press Ctrl + C to stop streaming..." << std::endl;
     }
 
-#define recv_to_file_args(format) \
-    (usrp,                        \
-        type,                     \
-        format,                   \
-        wirefmt,                  \
-        channel,                  \
-        file,                     \
-        fft_file,                 \
-        rate,                     \
-        spb,                      \
-        zlevel,                   \
-        total_num_samps,          \
-        total_time,               \
-        useVkFFT)
-    // recv to file
-    if (wirefmt == "s16") {
-        throw std::runtime_error("non-complex type not supported");
-    }
-
-    if (type == "double")
-        recv_to_file_args("fc64");
-    else if (type == "float")
-        recv_to_file_args("fc32");
-    else if (type == "short")
-        recv_to_file_args("sc16");
-    else
-        throw std::runtime_error("Unknown type " + type);
-
-    // finished
-    std::cerr << std::endl << "Done!" << std::endl << std::endl;
+    recv_to_file(usrp, type, wirefmt, channel, file, fft_file, rate, spb, zlevel, total_num_samps, total_time, useVkFFT);
 
     return EXIT_SUCCESS;
 }

@@ -208,12 +208,32 @@ void write_samples_worker()
     std::cerr << "write samples worker done" << std::endl;
 }
 
+
 size_t get_samp_size() {
     return samp_size;
 }
 
 
-void sample_pipeline_start(const std::string &type, const std::string &file, const std::string &fft_file, size_t max_samples_, size_t zlevel, bool useVkFFT_, size_t nfft_, size_t nfft_overlap_, size_t nfft_div, size_t nfft_ds_, size_t rate, size_t batches, size_t sample_id) {
+void set_sample_pipeline_types(const std::string &type, std::string &cpu_format) {
+    if (type == "double") {
+        write_samples_p = &write_samples<std::complex<double>>;
+        samp_size = sizeof(std::complex<double>);
+        cpu_format = "fc64";
+    } else if (type == "float") {
+        write_samples_p = &write_samples<std::complex<float>>;
+        samp_size = sizeof(std::complex<float>);
+        cpu_format = "fc32";
+    } else if (type == "short") {
+        write_samples_p = &write_samples<std::complex<short>>;
+        samp_size = sizeof(std::complex<short>);
+        cpu_format = "sc16";
+    } else {
+        throw std::runtime_error("Unknown type " + type);
+    }
+}
+
+
+void sample_pipeline_start(const std::string &file, const std::string &fft_file, size_t max_samples_, size_t zlevel, bool useVkFFT_, size_t nfft_, size_t nfft_overlap_, size_t nfft_div, size_t nfft_ds_, size_t rate, size_t batches, size_t sample_id) {
     nfft = nfft_;
     nfft_overlap_ = nfft_overlap_;
     nfft_ds = nfft_ds_;
@@ -223,18 +243,6 @@ void sample_pipeline_start(const std::string &type, const std::string &file, con
     if (useVkFFT) {
 	offload = vkfft_specgram_offload;
 	init_vkfft(batches, sample_id, nfft);
-    }
-    if (type == "double") {
-        write_samples_p = &write_samples<std::complex<double>>;
-        samp_size = sizeof(std::complex<double>);
-    } else if (type == "float") { 
-        write_samples_p = &write_samples<std::complex<float>>;
-        samp_size = sizeof(std::complex<float>);
-    } else if (type == "short") {
-        write_samples_p = &write_samples<std::complex<short>>;
-        samp_size = sizeof(std::complex<short>);
-    } else {
-        throw std::runtime_error("Unknown type " + type);
     }
     max_samples = max_samples_;
     max_buffer_size = max_samples * samp_size;
