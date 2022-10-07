@@ -49,6 +49,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     double time_requested       = 0.0,
     bool useVkFFT               = false)
 {
+    size_t samp_size = sizeof(samp_type);
     unsigned long long num_total_samps = 0;
     uhd::stream_args_t stream_args(cpu_format, wire_format);
     std::vector<size_t> channel_nums;
@@ -64,7 +65,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     const size_t max_samps_per_packet = rx_stream->get_max_num_samps();
     const size_t max_samples = std::max(max_samps_per_packet, samps_per_buff);
     std::cerr << "max_samps_per_packet from stream: " << max_samps_per_packet << std::endl;
-    const size_t max_buffer_size = max_samples * sizeof(samp_type);
+    const size_t max_buffer_size = max_samples * samp_size;
     std::cerr << "max_buffer_size: " << max_buffer_size << " (" << max_samples << " samples)" << std::endl;
 
     if (nfft) {
@@ -79,7 +80,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
         }
     }
 
-    init_sample_buffers(max_buffer_size, sizeof(samp_type));
+    init_sample_buffers(max_buffer_size, samp_size);
     sample_pipeline_start(type, file, fft_file, zlevel, useVkFFT, nfft, nfft_overlap, nfft_div, nfft_ds, rate, batches, sample_id);
 
     // setup streaming
@@ -127,7 +128,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
                            "  Dropped samples will not be written to the file.\n"
                            "  Please modify this example for your purposes.\n"
                            "  This message will not appear again.\n")
-                           % (usrp->get_rx_rate(channel) * sizeof(samp_type) / 1e6);
+                           % (usrp->get_rx_rate(channel) * samp_size / 1e6);
             }
             continue;
         }
@@ -137,7 +138,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
         }
 
         num_total_samps += num_rx_samps;
-        size_t samp_bytes = num_rx_samps * sizeof(samp_type);
+        size_t samp_bytes = num_rx_samps * samp_size;
         if (samp_bytes != buffer_capacity) {
             std::cerr << "resize to " << samp_bytes << " from " << buffer_capacity << std::endl;
             set_sample_buffer_capacity(write_ptr, samp_bytes);
