@@ -65,8 +65,6 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     const size_t max_samps_per_packet = rx_stream->get_max_num_samps();
     const size_t max_samples = std::max(max_samps_per_packet, samps_per_buff);
     std::cerr << "max_samps_per_packet from stream: " << max_samps_per_packet << std::endl;
-    const size_t max_buffer_size = max_samples * samp_size;
-    std::cerr << "max_buffer_size: " << max_buffer_size << " (" << max_samples << " samples)" << std::endl;
 
     if (nfft) {
         std::cerr << "using FFT point size " << nfft << std::endl;
@@ -80,8 +78,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
         }
     }
 
-    init_sample_buffers(max_buffer_size, samp_size);
-    sample_pipeline_start(type, file, fft_file, zlevel, useVkFFT, nfft, nfft_overlap, nfft_div, nfft_ds, rate, batches, sample_id);
+    sample_pipeline_start(type, file, fft_file, max_samples, zlevel, useVkFFT, nfft, nfft_overlap, nfft_div, nfft_ds, rate, batches, sample_id);
 
     // setup streaming
     uhd::stream_cmd_t stream_cmd((num_requested_samples == 0)
@@ -108,7 +105,6 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
            and (num_requested_samples != num_total_samps or num_requested_samples == 0)
            and (time_requested == 0.0 or std::chrono::steady_clock::now() < stop_time);) {
         const auto now = std::chrono::steady_clock::now();
-        set_sample_buffer_capacity(write_ptr, max_buffer_size);
         char *buffer_p = get_sample_buffer(write_ptr, &buffer_capacity);
         size_t num_rx_samps =
             rx_stream->recv(buffer_p, max_samples, md, 3.0, false);

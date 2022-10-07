@@ -17,23 +17,23 @@ const size_t kFFTbuffers = 256;
 static arma::fvec hammingWindow;
 static float hammingWindowSum = 0;
 
-static size_t nfft = 0, nfft_overlap = 0,  nfft_ds = 0, samp_size = 0;
+static size_t nfft = 0, nfft_overlap = 0, nfft_ds = 0, samp_size = 0, max_samples = 0, max_buffer_size = 0;
 static bool useVkFFT = false;
 static offload_p offload;
 static void(*write_samples_p)(size_t &, size_t &);
 
 static std::pair<arma::cx_fmat, arma::cx_fmat> FFTBuffers[kFFTbuffers];
-boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbuffers>> in_fft_queue;
-boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbuffers>> out_fft_queue;
+static boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbuffers>> in_fft_queue;
+static boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbuffers>> out_fft_queue;
 static std::pair<boost::scoped_ptr<char>, size_t> sampleBuffers[kSampleBuffers];
-boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kSampleBuffers>> sample_queue;
+static boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kSampleBuffers>> sample_queue;
 static arma::cx_fvec fft_samples_in;
 static boost::atomic<bool> samples_input_done(false);
 static boost::atomic<bool> write_samples_worker_done(false);
 static boost::atomic<bool> fft_in_worker_done(false);
-boost::scoped_ptr<SampleWriter> sample_writer;
-boost::scoped_ptr<SampleWriter> fft_sample_writer;
-boost::thread_group writer_threads;
+static boost::scoped_ptr<SampleWriter> sample_writer;
+static boost::scoped_ptr<SampleWriter> fft_sample_writer;
+static boost::thread_group writer_threads;
 
 
 void enqueue_samples(size_t &buffer_ptr) {
@@ -53,7 +53,7 @@ void set_sample_buffer_capacity(size_t buffer_ptr, size_t buffer_size) {
 }
 
 
-void init_sample_buffers(size_t max_buffer_size, size_t samp_size) {
+void init_sample_buffers() {
     for (size_t i = 0; i < kSampleBuffers; ++i) {
 	set_sample_buffer_capacity(i, max_buffer_size);
 	sampleBuffers[i].first.reset((char*)aligned_alloc(samp_size, max_buffer_size));
@@ -213,7 +213,7 @@ size_t get_samp_size() {
 }
 
 
-void sample_pipeline_start(const std::string &type, const std::string &file, const std::string &fft_file, size_t zlevel, bool useVkFFT_, size_t nfft_, size_t nfft_overlap_, size_t nfft_div, size_t nfft_ds_, size_t rate, size_t batches, size_t sample_id) {
+void sample_pipeline_start(const std::string &type, const std::string &file, const std::string &fft_file, size_t max_samples_, size_t zlevel, bool useVkFFT_, size_t nfft_, size_t nfft_overlap_, size_t nfft_div, size_t nfft_ds_, size_t rate, size_t batches, size_t sample_id) {
     nfft = nfft_;
     nfft_overlap_ = nfft_overlap_;
     nfft_ds = nfft_ds_;
@@ -236,6 +236,9 @@ void sample_pipeline_start(const std::string &type, const std::string &file, con
     } else {
         throw std::runtime_error("Unknown type " + type);
     }
+    max_samples = max_samples_;
+    max_buffer_size = max_samples * samp_size;
+    init_sample_buffers();
     init_hamming_window(nfft);
     fft_samples_in.set_size(rate / nfft_div);
     samples_input_done = false;
