@@ -15,7 +15,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <chrono>
-#include <complex>
 #include <csignal>
 #include <iostream>
 #include <thread>
@@ -24,8 +23,6 @@
 #include "sample_writer.h"
 
 namespace po = boost::program_options;
-
-static size_t nfft = 0, nfft_overlap = 0, nfft_div = 0, nfft_ds = 0, batches = 0, sample_id = 0;
 
 
 static bool stop_signal_called = false;
@@ -45,8 +42,14 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     size_t samps_per_buff,
     size_t zlevel,
     unsigned long long num_requested_samples,
-    double time_requested       = 0.0,
-    bool useVkFFT               = false)
+    double time_requested,
+    bool useVkFFT,
+    size_t nfft,
+    size_t nfft_overlap,
+    size_t nfft_div,
+    size_t nfft_ds,
+    size_t batches,
+    size_t sample_id)
 {
     std::string cpu_format;
     set_sample_pipeline_types(type, cpu_format);
@@ -181,7 +184,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 {
     // variables to be set by po
     std::string args, file, fft_file, type, ant, subdev, ref, wirefmt;
-    size_t channel, total_num_samps, spb, zlevel, rate;
+    size_t channel, total_num_samps, spb, zlevel, rate, nfft, nfft_overlap, nfft_div, nfft_ds, batches, sample_id;
     double option_rate, freq, gain, bw, total_time, setup_time, lo_offset;
 
     // setup the program options
@@ -293,6 +296,20 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
               << std::endl
               << std::endl;
 
+    // set the rf gain
+    if (vm.count("gain")) {
+        std::cerr << boost::format("Setting RX Gain: %f dB...") % gain << std::endl;
+        usrp->set_rx_gain(gain, channel);
+        std::cerr << boost::format("Actual RX Gain: %f dB...")
+                         % usrp->get_rx_gain(channel)
+                  << std::endl
+                  << std::endl;
+    }
+
+    // set the antenna
+    if (vm.count("ant"))
+       usrp->set_rx_antenna(ant, channel);
+
     // set the center frequency
     if (vm.count("freq")) { // with default of 0.0 this will always be true
         std::cerr << boost::format("Setting RX Freq: %f MHz...") % (freq / 1e6)
@@ -309,16 +326,6 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
                   << std::endl;
     }
 
-    // set the rf gain
-    if (vm.count("gain")) {
-        std::cerr << boost::format("Setting RX Gain: %f dB...") % gain << std::endl;
-        usrp->set_rx_gain(gain, channel);
-        std::cerr << boost::format("Actual RX Gain: %f dB...")
-                         % usrp->get_rx_gain(channel)
-                  << std::endl
-                  << std::endl;
-    }
-
     // set the IF filter bandwidth
     if (vm.count("bw")) {
         std::cerr << boost::format("Setting RX Bandwidth: %f MHz...") % (bw / 1e6)
@@ -328,10 +335,6 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
                          % (usrp->get_rx_bandwidth(channel) / 1e6)
                   << std::endl
                   << std::endl;
-
-    // set the antenna
-    if (vm.count("ant"))
-        usrp->set_rx_antenna(ant, channel);
     }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(int64_t(1000 * setup_time)));
@@ -367,7 +370,9 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         std::cerr << "Press Ctrl + C to stop streaming..." << std::endl;
     }
 
-    recv_to_file(usrp, type, wirefmt, channel, file, fft_file, rate, spb, zlevel, total_num_samps, total_time, useVkFFT);
+    recv_to_file(usrp, type, wirefmt, channel,
+        file, fft_file, rate, spb, zlevel, total_num_samps, total_time,
+        useVkFFT, nfft, nfft_overlap, nfft_div, nfft_ds, batches, sample_id);
 
     return EXIT_SUCCESS;
 }
