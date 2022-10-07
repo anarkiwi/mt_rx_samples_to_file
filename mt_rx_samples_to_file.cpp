@@ -241,7 +241,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     bool useVkFFT               = vm.count("novkfft") == 0;
 
     if (!boost::algorithm::starts_with(wirefmt, "sc")) {
-        throw std::runtime_error("non-complex type not supported");
+        throw std::runtime_error("non-complex wirefmt not supported");
     }
 
     if (option_rate <= 0.0) {
