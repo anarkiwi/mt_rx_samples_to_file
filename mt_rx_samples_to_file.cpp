@@ -34,7 +34,6 @@ void sig_int_handler(int)
 }
 
 
-template <typename samp_type>
 void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     const std::string& type,
     const std::string& cpu_format,
@@ -49,7 +48,6 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     double time_requested       = 0.0,
     bool useVkFFT               = false)
 {
-    size_t samp_size = sizeof(samp_type);
     unsigned long long num_total_samps = 0;
     uhd::stream_args_t stream_args(cpu_format, wire_format);
     std::vector<size_t> channel_nums;
@@ -117,14 +115,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
             ++overflows;
             if (overflow_message) {
                 overflow_message = false;
-                std::cerr
-                    << boost::format(
-                           "Got an overflow indication. Please consider the following:\n"
-                           "  Your write medium must sustain a rate of %fMB/s.\n"
-                           "  Dropped samples will not be written to the file.\n"
-                           "  Please modify this example for your purposes.\n"
-                           "  This message will not appear again.\n")
-                           % (usrp->get_rx_rate(channel) * samp_size / 1e6);
+                std::cerr << "Overflow!" << std::endl;
             }
             continue;
         }
@@ -134,7 +125,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
         }
 
         num_total_samps += num_rx_samps;
-        size_t samp_bytes = num_rx_samps * samp_size;
+        size_t samp_bytes = num_rx_samps * get_samp_size();
         if (samp_bytes != buffer_capacity) {
             std::cerr << "resize to " << samp_bytes << " from " << buffer_capacity << std::endl;
             set_sample_buffer_capacity(write_ptr, samp_bytes);
@@ -391,11 +382,11 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     }
 
     if (type == "double")
-        recv_to_file<std::complex<double>> recv_to_file_args("fc64");
+        recv_to_file_args("fc64");
     else if (type == "float")
-        recv_to_file<std::complex<float>> recv_to_file_args("fc32");
+        recv_to_file_args("fc32");
     else if (type == "short")
-        recv_to_file<std::complex<short>> recv_to_file_args("sc16");
+        recv_to_file_args("sc16");
     else
         throw std::runtime_error("Unknown type " + type);
 
