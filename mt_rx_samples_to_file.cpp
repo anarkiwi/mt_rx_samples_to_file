@@ -47,7 +47,6 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     size_t zlevel,
     unsigned long long num_requested_samples,
     double time_requested       = 0.0,
-    bool continue_on_bad_packet = false,
     bool useVkFFT               = false)
 {
     unsigned long long num_total_samps = 0;
@@ -134,11 +133,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
         }
         if (md.error_code != uhd::rx_metadata_t::ERROR_CODE_NONE) {
             std::string error = str(boost::format("Receiver error: %s") % md.strerror());
-            if (continue_on_bad_packet) {
-                std::cerr << error << std::endl;
-                continue;
-            } else
-                throw std::runtime_error(error);
+            throw std::runtime_error(error);
         }
 
         num_total_samps += num_rx_samps;
@@ -233,7 +228,6 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         ("setup", po::value<double>(&setup_time)->default_value(1.0), "seconds of setup time")
         ("null", "run without writing to file")
         ("fftnull", "run without writing to FFT file")
-        ("continue", "don't abort on a bad packet")
         ("skip-lo", "skip checking LO lock status")
         ("int-n", "tune USRP with integer-N tuning")
         ("nfft", po::value<size_t>(&nfft)->default_value(0), "if > 0, calculate n FFT points")
@@ -262,7 +256,6 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 
     bool null                   = vm.count("null") > 0;
     bool fftnull                = vm.count("fftnull") > 0;
-    bool continue_on_bad_packet = vm.count("continue") > 0;
     bool useVkFFT               = vm.count("novkfft") == 0;
 
     if (!fft_file.size()) {
@@ -394,7 +387,6 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         zlevel,                   \
         total_num_samps,          \
         total_time,               \
-        continue_on_bad_packet,   \
         useVkFFT)
     // recv to file
     if (wirefmt == "s16") {
