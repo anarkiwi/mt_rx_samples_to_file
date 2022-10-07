@@ -37,7 +37,7 @@ boost::thread_group writer_threads;
 
 void enqueue_samples(size_t &buffer_ptr) {
     if (!sample_queue.push(buffer_ptr)) {
-	std::cout << "sample buffer queue failed (overflow)" << std::endl;
+	std::cerr << "sample buffer queue failed (overflow)" << std::endl;
 	return;
     }
 
@@ -102,7 +102,7 @@ void fft_in_worker()
     }
     fftin();
     fft_in_worker_done = true;
-    std::cout << "fft worker done" << std::endl;
+    std::cerr << "fft worker done" << std::endl;
 }
 
 
@@ -128,7 +128,7 @@ void fft_out_worker()
 	usleep(10000);
     }
     fftout();
-    std::cout << "fft out worker done" << std::endl;
+    std::cerr << "fft out worker done" << std::endl;
 }
 
 
@@ -187,7 +187,7 @@ void write_samples(size_t &fft_write_ptr, size_t &curr_nfft_ds)
 	    }
 	}
 	sample_writer->write(buffer_p, buffer_capacity);
-	std::cout << "." << std::endl;
+	std::cerr << "." << std::endl;
     }
 }
 
@@ -217,7 +217,7 @@ void write_samples_worker(const std::string &type)
 
     wrap_write_samples(type, fft_write_ptr, curr_nfft_ds);
     write_samples_worker_done = true;
-    std::cout << "write samples worker done" << std::endl;
+    std::cerr << "write samples worker done" << std::endl;
 }
 
 
