@@ -41,22 +41,22 @@ void SampleWriter::open(const std::string &file, size_t zlevel) {
     file_ = file;
     dotfile_ = get_dotfile(file_);
     orig_path_ = boost::filesystem::path(file_);
-    std::cout << "opening " << dotfile_ << std::endl;
+    std::cerr << "opening " << dotfile_ << std::endl;
     outfile.open(dotfile_.c_str(), std::ofstream::binary);
     if (!outfile.is_open()) {
 	throw std::runtime_error(dotfile_ + " could not be opened");
     }
     if (orig_path_.has_extension()) {
 	if (orig_path_.extension() == ".gz") {
-	    std::cout << "writing gzip compressed output" << std::endl;
+	    std::cerr << "writing gzip compressed output" << std::endl;
 	    outbuf_p->push(boost::iostreams::gzip_compressor(
 			       boost::iostreams::gzip_params(zlevel)));
 	} else if (orig_path_.extension() == ".zst") {
-	    std::cout << "writing zstd compressed output" << std::endl;
+	    std::cerr << "writing zstd compressed output" << std::endl;
 	    outbuf_p->push(boost::iostreams::zstd_compressor(
 			       boost::iostreams::zstd_params(zlevel)));
 	} else {
-	    std::cout << "writing uncompressed output" << std::endl;
+	    std::cerr << "writing uncompressed output" << std::endl;
 	}
     }
     outbuf_p->push(outfile);
@@ -65,7 +65,7 @@ void SampleWriter::open(const std::string &file, size_t zlevel) {
 
 void SampleWriter::close(size_t overflows) {
     if (outfile.is_open()) {
-	std::cout << "closing " << file_ << std::endl;
+	std::cerr << "closing " << file_ << std::endl;
 	boost::iostreams::close(*outbuf_p);
 	outfile.close();
 
