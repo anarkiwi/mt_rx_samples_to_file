@@ -17,7 +17,7 @@ int64_t init_vkfft(size_t batches, size_t sample_id, size_t nfft) {
     VkResult res = VK_SUCCESS;
     res = createInstance(&vkGPU, sample_id);
     if (res) {
-	std::cout << "VKFFT_ERROR_FAILED_TO_CREATE_INSTANCE" << std::endl;
+	std::cerr << "VKFFT_ERROR_FAILED_TO_CREATE_INSTANCE" << std::endl;
 	return VKFFT_ERROR_FAILED_TO_CREATE_INSTANCE;
     }
     res = setupDebugMessenger(&vkGPU);
@@ -63,7 +63,7 @@ int64_t init_vkfft(size_t batches, size_t sample_id, size_t nfft) {
     vkConfiguration.doublePrecision = false;
     vkConfiguration.numberBatches = batches;
 
-    std::cout << "using vkFFT batch size " << vkConfiguration.numberBatches << " on " << vkGPU.physicalDeviceProperties.deviceName << std::endl;
+    std::cerr << "using vkFFT batch size " << vkConfiguration.numberBatches << " on " << vkGPU.physicalDeviceProperties.deviceName << std::endl;
 
     vkConfiguration.bufferSize = (uint64_t*)aligned_alloc(sizeof(uint64_t), sizeof(uint64_t) * kVkNumBuf);
     if (!vkConfiguration.bufferSize) return VKFFT_ERROR_MALLOC_FAILED;

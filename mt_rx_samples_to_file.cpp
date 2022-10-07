@@ -10,6 +10,7 @@
 #include <uhd/usrp/multi_usrp.hpp>
 #include <uhd/utils/safe_main.hpp>
 #include <uhd/utils/thread.hpp>
+#include <boost/algorithm/string/predicate.hpp>
 #include <boost/program_options.hpp>
 #include <cstdio>
 #include <cstdlib>
@@ -34,10 +35,8 @@ void sig_int_handler(int)
 }
 
 
-template <typename samp_type>
 void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     const std::string& type,
-    const std::string& cpu_format,
     const std::string& wire_format,
     const size_t& channel,
     const std::string& file,
@@ -49,38 +48,28 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     double time_requested       = 0.0,
     bool useVkFFT               = false)
 {
-    unsigned long long num_total_samps = 0;
+    std::string cpu_format;
+    set_sample_pipeline_types(type, cpu_format);
+
     uhd::stream_args_t stream_args(cpu_format, wire_format);
     std::vector<size_t> channel_nums;
     channel_nums.push_back(channel);
     stream_args.channels             = channel_nums;
     uhd::rx_streamer::sptr rx_stream = usrp->get_rx_stream(stream_args);
 
-    if (samps_per_buff == 0) {
-        samps_per_buff = rate;
-        std::cout << "defaulting spb to rate (" << samps_per_buff << ")" << std::endl;
-    }
-
     const size_t max_samps_per_packet = rx_stream->get_max_num_samps();
     const size_t max_samples = std::max(max_samps_per_packet, samps_per_buff);
-    std::cout << "max_samps_per_packet from stream: " << max_samps_per_packet << std::endl;
-    const size_t max_buffer_size = max_samples * sizeof(samp_type);
-    std::cout << "max_buffer_size: " << max_buffer_size << " (" << max_samples << " samples)" << std::endl;
+    std::cerr << "max_samps_per_packet from stream: " << max_samps_per_packet << std::endl;
 
     if (nfft) {
-        std::cout << "using FFT point size " << nfft << std::endl;
+        std::cerr << "using FFT point size " << nfft << std::endl;
 
         if (samps_per_buff % nfft) {
             throw std::runtime_error("FFT point size must be a factor of spb");
         }
-
-        if (rate % nfft_div) {
-            throw std::runtime_error("nfft_div must be a factor of sample rate");
-        }
     }
 
-    init_sample_buffers(max_buffer_size, sizeof(samp_type));
-    sample_pipeline_start(type, file, fft_file, zlevel, useVkFFT, nfft, nfft_overlap, nfft_div, nfft_ds, rate, batches, sample_id);
+    sample_pipeline_start(file, fft_file, max_samples, zlevel, useVkFFT, nfft, nfft_overlap, nfft_div, nfft_ds, rate, batches, sample_id);
 
     // setup streaming
     uhd::stream_cmd_t stream_cmd((num_requested_samples == 0)
@@ -95,6 +84,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     size_t buffer_capacity = 0;
     bool overflow_message = true;
     size_t overflows = 0;
+    unsigned long long num_total_samps = 0;
 
     const auto stop_time =
         std::chrono::steady_clock::now() + std::chrono::milliseconds(int64_t(1000 * time_requested));
@@ -107,27 +97,19 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
            and (num_requested_samples != num_total_samps or num_requested_samples == 0)
            and (time_requested == 0.0 or std::chrono::steady_clock::now() < stop_time);) {
         const auto now = std::chrono::steady_clock::now();
-        set_sample_buffer_capacity(write_ptr, max_buffer_size);
         char *buffer_p = get_sample_buffer(write_ptr, &buffer_capacity);
         size_t num_rx_samps =
             rx_stream->recv(buffer_p, max_samples, md, 3.0, false);
 
         if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_TIMEOUT) {
-            std::cout << boost::format("Timeout while streaming") << std::endl;
+            std::cerr << boost::format("Timeout while streaming") << std::endl;
             break;
         }
         if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_OVERFLOW) {
             ++overflows;
             if (overflow_message) {
                 overflow_message = false;
-                std::cerr
-                    << boost::format(
-                           "Got an overflow indication. Please consider the following:\n"
-                           "  Your write medium must sustain a rate of %fMB/s.\n"
-                           "  Dropped samples will not be written to the file.\n"
-                           "  Please modify this example for your purposes.\n"
-                           "  This message will not appear again.\n")
-                           % (usrp->get_rx_rate(channel) * sizeof(samp_type) / 1e6);
+                std::cerr << "Overflow!" << std::endl;
             }
             continue;
         }
@@ -137,9 +119,9 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
         }
 
         num_total_samps += num_rx_samps;
-        size_t samp_bytes = num_rx_samps * sizeof(samp_type);
+        size_t samp_bytes = num_rx_samps * get_samp_size();
         if (samp_bytes != buffer_capacity) {
-            std::cout << "resize to " << samp_bytes << " from " << buffer_capacity << std::endl;
+            std::cerr << "resize to " << samp_bytes << " from " << buffer_capacity << std::endl;
             set_sample_buffer_capacity(write_ptr, samp_bytes);
         }
 
@@ -148,9 +130,9 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
 
     stream_cmd.stream_mode = uhd::stream_cmd_t::STREAM_MODE_STOP_CONTINUOUS;
     rx_stream->issue_stream_cmd(stream_cmd);
-    std::cout << "stream stopped" << std::endl;
+    std::cerr << "stream stopped" << std::endl;
     sample_pipeline_stop(overflows);
-    std::cout << "pipeline stopped" << std::endl;
+    std::cerr << "pipeline stopped" << std::endl;
 }
 
 bool check_locked_sensor(std::vector<std::string> sensor_names,
@@ -166,32 +148,32 @@ bool check_locked_sensor(std::vector<std::string> sensor_names,
                          + std::chrono::milliseconds(int64_t(setup_time * 1000));
     bool lock_detected = false;
 
-    std::cout << boost::format("Waiting for \"%s\": ") % sensor_name;
-    std::cout.flush();
+    std::cerr << boost::format("Waiting for \"%s\": ") % sensor_name;
+    std::cerr.flush();
 
     while (true) {
         if (lock_detected and (std::chrono::steady_clock::now() > setup_timeout)) {
-            std::cout << " locked." << std::endl;
+            std::cerr << " locked." << std::endl;
             break;
         }
         if (get_sensor_fn(sensor_name).to_bool()) {
-            std::cout << "+";
-            std::cout.flush();
+            std::cerr << "+";
+            std::cerr.flush();
             lock_detected = true;
         } else {
             if (std::chrono::steady_clock::now() > setup_timeout) {
-                std::cout << std::endl;
+                std::cerr << std::endl;
                 throw std::runtime_error(
                     str(boost::format(
                             "timed out waiting for consecutive locks on sensor \"%s\"")
                         % sensor_name));
             }
-            std::cout << "_";
-            std::cout.flush();
+            std::cerr << "_";
+            std::cerr.flush();
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
-    std::cout << std::endl;
+    std::cerr << std::endl;
     return true;
 }
 
@@ -224,7 +206,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         ("channel", po::value<size_t>(&channel)->default_value(0), "which channel to use")
         ("bw", po::value<double>(&bw), "analog frontend filter bandwidth in Hz")
         ("ref", po::value<std::string>(&ref)->default_value("internal"), "reference source (internal, external, mimo)")
-        ("wirefmt", po::value<std::string>(&wirefmt)->default_value("sc16"), "wire format (sc8, sc16 or s16)")
+        ("wirefmt", po::value<std::string>(&wirefmt)->default_value("sc16"), "wire format (sc8, sc16)")
         ("setup", po::value<double>(&setup_time)->default_value(1.0), "seconds of setup time")
         ("null", "run without writing to file")
         ("fftnull", "run without writing to FFT file")
@@ -246,8 +228,8 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 
     // print the help message
     if (vm.count("help")) {
-        std::cout << boost::format("UHD RX samples to file %s") % desc << std::endl;
-        std::cout << std::endl
+        std::cerr << boost::format("UHD RX samples to file %s") % desc << std::endl;
+        std::cerr << std::endl
                   << "This application streams data from a single channel of a USRP "
                      "device to a file.\n"
                   << std::endl;
@@ -257,6 +239,24 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     bool null                   = vm.count("null") > 0;
     bool fftnull                = vm.count("fftnull") > 0;
     bool useVkFFT               = vm.count("novkfft") == 0;
+
+    if (!boost::algorithm::starts_with(wirefmt, "sc")) {
+        throw std::runtime_error("non-complex wirefmt not supported");
+    }
+
+    if (option_rate <= 0.0) {
+        throw std::runtime_error("invalid sample rate");
+    }
+    rate = size_t(option_rate);
+
+    if (rate % nfft_div) {
+        throw std::runtime_error("nfft_div must be a factor of sample rate");
+    }
+
+    if (spb == 0) {
+        spb = rate;
+        std::cerr << "defaulting spb to rate (" << spb << ")" << std::endl;
+    }
 
     if (!fft_file.size()) {
         fft_file = get_prefix_file(file, "fft_");
@@ -270,16 +270,9 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         fft_file.clear();
     }
 
-    // set the sample rate
-    if (option_rate <= 0.0) {
-        std::cerr << "Please specify a valid sample rate" << std::endl;
-        return ~0;
-    }
-    rate = size_t(option_rate);
-
     // create a usrp device
-    std::cout << std::endl;
-    std::cout << boost::format("Creating the usrp device with: %s...") % args
+    std::cerr << std::endl;
+    std::cerr << boost::format("Creating the usrp device with: %s...") % args
               << std::endl;
     uhd::usrp::multi_usrp::sptr usrp = uhd::usrp::multi_usrp::make(args);
 
@@ -292,25 +285,25 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     if (vm.count("subdev"))
         usrp->set_rx_subdev_spec(subdev);
 
-    std::cout << boost::format("Using Device: %s") % usrp->get_pp_string() << std::endl;
-    std::cout << boost::format("Setting RX Rate: %f Msps...") % (rate / 1e6) << std::endl;
+    std::cerr << boost::format("Using Device: %s") % usrp->get_pp_string() << std::endl;
+    std::cerr << boost::format("Setting RX Rate: %f Msps...") % (rate / 1e6) << std::endl;
     usrp->set_rx_rate(rate, channel);
-    std::cout << boost::format("Actual RX Rate: %f Msps...")
+    std::cerr << boost::format("Actual RX Rate: %f Msps...")
                      % (usrp->get_rx_rate(channel) / 1e6)
               << std::endl
               << std::endl;
 
     // set the center frequency
     if (vm.count("freq")) { // with default of 0.0 this will always be true
-        std::cout << boost::format("Setting RX Freq: %f MHz...") % (freq / 1e6)
+        std::cerr << boost::format("Setting RX Freq: %f MHz...") % (freq / 1e6)
                   << std::endl;
-        std::cout << boost::format("Setting RX LO Offset: %f MHz...") % (lo_offset / 1e6)
+        std::cerr << boost::format("Setting RX LO Offset: %f MHz...") % (lo_offset / 1e6)
                   << std::endl;
         uhd::tune_request_t tune_request(freq, lo_offset);
         if (vm.count("int-n"))
             tune_request.args = uhd::device_addr_t("mode_n=integer");
         usrp->set_rx_freq(tune_request, channel);
-        std::cout << boost::format("Actual RX Freq: %f MHz...")
+        std::cerr << boost::format("Actual RX Freq: %f MHz...")
                          % (usrp->get_rx_freq(channel) / 1e6)
                   << std::endl
                   << std::endl;
@@ -318,9 +311,9 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 
     // set the rf gain
     if (vm.count("gain")) {
-        std::cout << boost::format("Setting RX Gain: %f dB...") % gain << std::endl;
+        std::cerr << boost::format("Setting RX Gain: %f dB...") % gain << std::endl;
         usrp->set_rx_gain(gain, channel);
-        std::cout << boost::format("Actual RX Gain: %f dB...")
+        std::cerr << boost::format("Actual RX Gain: %f dB...")
                          % usrp->get_rx_gain(channel)
                   << std::endl
                   << std::endl;
@@ -328,10 +321,10 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 
     // set the IF filter bandwidth
     if (vm.count("bw")) {
-        std::cout << boost::format("Setting RX Bandwidth: %f MHz...") % (bw / 1e6)
+        std::cerr << boost::format("Setting RX Bandwidth: %f MHz...") % (bw / 1e6)
                   << std::endl;
         usrp->set_rx_bandwidth(bw, channel);
-        std::cout << boost::format("Actual RX Bandwidth: %f MHz...")
+        std::cerr << boost::format("Actual RX Bandwidth: %f MHz...")
                          % (usrp->get_rx_bandwidth(channel) / 1e6)
                   << std::endl
                   << std::endl;
@@ -371,39 +364,10 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 
     if (total_num_samps == 0) {
         std::signal(SIGINT, &sig_int_handler);
-        std::cout << "Press Ctrl + C to stop streaming..." << std::endl;
+        std::cerr << "Press Ctrl + C to stop streaming..." << std::endl;
     }
 
-#define recv_to_file_args(format) \
-    (usrp,                        \
-        type,                     \
-        format,                   \
-        wirefmt,                  \
-        channel,                  \
-        file,                     \
-        fft_file,                 \
-        rate,                     \
-        spb,                      \
-        zlevel,                   \
-        total_num_samps,          \
-        total_time,               \
-        useVkFFT)
-    // recv to file
-    if (wirefmt == "s16") {
-        throw std::runtime_error("non-complex type not supported");
-    }
-
-    if (type == "double")
-        recv_to_file<std::complex<double>> recv_to_file_args("fc64");
-    else if (type == "float")
-        recv_to_file<std::complex<float>> recv_to_file_args("fc32");
-    else if (type == "short")
-        recv_to_file<std::complex<short>> recv_to_file_args("sc16");
-    else
-        throw std::runtime_error("Unknown type " + type);
-
-    // finished
-    std::cout << std::endl << "Done!" << std::endl << std::endl;
+    recv_to_file(usrp, type, wirefmt, channel, file, fft_file, rate, spb, zlevel, total_num_samps, total_time, useVkFFT);
 
     return EXIT_SUCCESS;
 }

@@ -8,8 +8,10 @@
 
 BOOST_AUTO_TEST_CASE(SmokeTest)
 {
-    init_sample_buffers(1e3*1024, 4);
-    sample_pipeline_start("short", "", "", 1, false, 0, 0, 1, 1, 1e6, 0, 0);
+    std::string cpu_format;
+    set_sample_pipeline_types("short", cpu_format);
+    BOOST_TEST(cpu_format == "sc16");
+    sample_pipeline_start("", "", 1e6, 1, false, 0, 0, 1, 1, 1e6, 0, 0);
     sample_pipeline_stop(0);
 }
 
@@ -24,8 +26,10 @@ BOOST_AUTO_TEST_CASE(RandomFFTTest)
     arma::arma_rng::set_seed_random();
     arma::Col<std::complex<float>> samples(1e3 * 1024);
     samples.randu();
-    init_sample_buffers(samples.size() * sizeof(std::complex<float>), sizeof(std::complex<float>));
-    sample_pipeline_start("float", file, fft_file, 1, false, 256, 128, 1, 1, samples.size(), 100, 0);
+    std::string cpu_format;
+    set_sample_pipeline_types("float", cpu_format);
+    BOOST_TEST(cpu_format == "fc32");
+    sample_pipeline_start(file, fft_file, samples.size(), 1, false, 256, 128, 1, 1, samples.size(), 100, 0);
     size_t buffer_capacity;
     size_t write_ptr = 0;
     char *buffer_p = get_sample_buffer(write_ptr, &buffer_capacity);
@@ -48,4 +52,3 @@ BOOST_AUTO_TEST_CASE(RandomFFTTest)
     fclose(fft_samples_fp);
     remove_all(tmpdir);
 }
-
