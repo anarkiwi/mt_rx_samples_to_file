@@ -226,11 +226,11 @@ void sample_pipeline_start(const std::string &type, const std::string &file, con
     }
     if (type == "double") {
         write_samples_p = &write_samples<std::complex<double>>;
-        samp_size = sizeof(std::complex<double>>);
+        samp_size = sizeof(std::complex<double>);
     } else if (type == "float") { 
         write_samples_p = &write_samples<std::complex<float>>;
-        samp_size = sizeof(std::complex<float>>);
-    } else if (type == "short")
+        samp_size = sizeof(std::complex<float>);
+    } else if (type == "short") {
         write_samples_p = &write_samples<std::complex<short>>;
         samp_size = sizeof(std::complex<short>);
     } else {
