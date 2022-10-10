@@ -19,6 +19,8 @@
 #include <iostream>
 #include <thread>
 
+#include "json.hpp"
+
 #include "sample_pipeline.h"
 #include "sample_writer.h"
 

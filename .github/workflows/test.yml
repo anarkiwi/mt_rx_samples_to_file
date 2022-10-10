@@ -10,6 +10,7 @@ jobs:
         sudo apt-get update && sudo apt-get install -qy build-essential cmake libuhd-dev libboost-all-dev cppcheck libarmadillo-dev unzip wget libvulkan-dev && \
         wget https://sourceforge.net/projects/sigpack/files/sigpack-1.2.7.zip -O sigpack.zip && unzip sigpack.zip && ln -s sigpack-*/sigpack . && \
         git clone https://github.com/DTolm/VkFFT && \
+        wget https://github.com/nlohmann/json/releases/download/v3.11.2/json.hpp && \
         cd VkFFT && git checkout 33109a0031c7c005291b81681ec2d1af5c5aefc7 && mkdir build && cd build && cmake .. && make -j $(nproc) && cd ../.. && \
         mkdir build && cd build && cmake .. && make && make test && cd .. && \
         cppcheck *cpp

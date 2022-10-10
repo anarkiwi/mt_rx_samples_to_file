@@ -33,6 +33,7 @@
 
 build/
 sigpack*
+json.hpp
 VkFFT
 *~
 *\#
