@@ -24,6 +24,7 @@
 #include "sample_pipeline.h"
 #include "sample_writer.h"
 
+using json = nlohmann::json;
 namespace po = boost::program_options;
 
 
@@ -140,6 +141,7 @@ void recv_to_file(uhd::usrp::multi_usrp::sptr usrp,
     std::cerr << "pipeline stopped" << std::endl;
 }
 
+
 bool check_locked_sensor(std::vector<std::string> sensor_names,
     const char* sensor_name,
     std::function<uhd::sensor_value_t(const std::string&)> get_sensor_fn,
@@ -182,6 +184,52 @@ bool check_locked_sensor(std::vector<std::string> sensor_names,
     return true;
 }
 
+
+void retune(uhd::usrp::multi_usrp::sptr usrp, size_t channel, double freq, double lo_offset, bool int_n) {
+    // set the center frequency
+    std::cerr << boost::format("Setting RX Freq: %f MHz...") % (freq / 1e6)
+              << std::endl;
+    std::cerr << boost::format("Setting RX LO Offset: %f MHz...") % (lo_offset / 1e6)
+              << std::endl;
+    uhd::tune_request_t tune_request(freq, lo_offset);
+    if (int_n) {
+        tune_request.args = uhd::device_addr_t("mode_n=integer");
+    }
+    usrp->set_rx_freq(tune_request, channel);
+    std::cerr << boost::format("Actual RX Freq: %f MHz...")
+                     % (usrp->get_rx_freq(channel) / 1e6)
+              << std::endl
+              << std::endl;
+}
+
+
+void lo_lock(uhd::usrp::multi_usrp::sptr usrp, std::string &ref, size_t channel, double setup_time) {
+    check_locked_sensor(usrp->get_rx_sensor_names(channel),
+                        "lo_locked",
+                        [usrp, channel](const std::string& sensor_name) {
+                            return usrp->get_rx_sensor(sensor_name, channel);
+                        },
+                        setup_time);
+    if (ref == "mimo") {
+        check_locked_sensor(usrp->get_mboard_sensor_names(0),
+                            "mimo_locked",
+                            [usrp](const std::string& sensor_name) {
+                                return usrp->get_mboard_sensor(sensor_name);
+                            },
+                            setup_time);
+    }
+    if (ref == "external") {
+        check_locked_sensor(usrp->get_mboard_sensor_names(0),
+                            "ref_locked",
+                            [usrp](const std::string& sensor_name) {
+                                return usrp->get_mboard_sensor(sensor_name);
+                            },
+                            setup_time);
+    }
+
+}
+
+
 int UHD_SAFE_MAIN(int argc, char* argv[])
 {
     // variables to be set by po
@@ -201,7 +249,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         ("duration", po::value<double>(&total_time)->default_value(0), "total number of seconds to receive")
         ("zlevel", po::value<size_t>(&zlevel)->default_value(1), "default compression level")
         ("spb", po::value<size_t>(&spb)->default_value(0), "samples per buffer (if 0, same as rate)")
-        ("rate", po::value<double>(&option_rate)->default_value(20 * (1024*1024)), "rate of incoming samples")
+        ("rate", po::value<double>(&option_rate)->default_value(2.048e6), "rate of incoming samples")
         ("freq", po::value<double>(&freq)->default_value(100e6), "RF center frequency in Hz")
         ("lo-offset", po::value<double>(&lo_offset)->default_value(0.0),
             "Offset for frontend LO in Hz (optional)")
@@ -220,11 +268,12 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         ("nfft", po::value<size_t>(&nfft)->default_value(0), "if > 0, calculate n FFT points")
         ("nfft_overlap", po::value<size_t>(&nfft_overlap)->default_value(0), "FFT overlap")
         ("nfft_div", po::value<size_t>(&nfft_div)->default_value(50), "calculate FFT over sample rate / n samples (e.g 50 == 20ms)")
-        ("nfft_ds", po::value<size_t>(&nfft_ds)->default_value(10), "NFFT downsampling interval")
+        ("nfft_ds", po::value<size_t>(&nfft_ds)->default_value(1), "NFFT downsampling interval")
         ("fft_file", po::value<std::string>(&fft_file)->default_value(""), "name of file to write FFT points to (default derive from --file)")
         ("novkfft", "do not use vkFFT (use software FFT)")
         ("vkfft_batches", po::value<size_t>(&batches)->default_value(100), "vkFFT batches")
         ("vkfft_sample_id", po::value<size_t>(&sample_id)->default_value(0), "vkFFT sample_id")
+        ("json", "take parameters from json on stdin")
     ;
     // clang-format on
     po::variables_map vm;
@@ -244,6 +293,9 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     bool null                   = vm.count("null") > 0;
     bool fftnull                = vm.count("fftnull") > 0;
     bool useVkFFT               = vm.count("novkfft") == 0;
+    bool use_json_args          = vm.count("json") > 0;
+    bool int_n                  = vm.count("int-n") > 0;
+    bool skip_lo                = vm.count("skip-lo") > 0;
 
     if (!boost::algorithm::starts_with(wirefmt, "sc")) {
         throw std::runtime_error("non-complex wirefmt not supported");
@@ -312,22 +364,6 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     if (vm.count("ant"))
        usrp->set_rx_antenna(ant, channel);
 
-    // set the center frequency
-    if (vm.count("freq")) { // with default of 0.0 this will always be true
-        std::cerr << boost::format("Setting RX Freq: %f MHz...") % (freq / 1e6)
-                  << std::endl;
-        std::cerr << boost::format("Setting RX LO Offset: %f MHz...") % (lo_offset / 1e6)
-                  << std::endl;
-        uhd::tune_request_t tune_request(freq, lo_offset);
-        if (vm.count("int-n"))
-            tune_request.args = uhd::device_addr_t("mode_n=integer");
-        usrp->set_rx_freq(tune_request, channel);
-        std::cerr << boost::format("Actual RX Freq: %f MHz...")
-                         % (usrp->get_rx_freq(channel) / 1e6)
-                  << std::endl
-                  << std::endl;
-    }
-
     // set the IF filter bandwidth
     if (vm.count("bw")) {
         std::cerr << boost::format("Setting RX Bandwidth: %f MHz...") % (bw / 1e6)
@@ -339,42 +375,61 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
                   << std::endl;
     }
 
+    retune(usrp, channel, freq, lo_offset, int_n);
+    if (!skip_lo) {
+        lo_lock(usrp, ref, channel, setup_time);
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(int64_t(1000 * setup_time)));
 
-    // check Ref and LO Lock detect
-    if (not vm.count("skip-lo")) {
-        check_locked_sensor(usrp->get_rx_sensor_names(channel),
-            "lo_locked",
-            [usrp, channel](const std::string& sensor_name) {
-                return usrp->get_rx_sensor(sensor_name, channel);
-            },
-            setup_time);
-        if (ref == "mimo") {
-            check_locked_sensor(usrp->get_mboard_sensor_names(0),
-                "mimo_locked",
-                [usrp](const std::string& sensor_name) {
-                    return usrp->get_mboard_sensor(sensor_name);
-                },
-                setup_time);
+    if (use_json_args) {
+        json status, json_args;
+        std::string line, last_error;
+        for (;;) {
+            status["freq"] = freq;
+            status["last_error"] = last_error;
+            last_error.clear();
+            std::cout << status << std::endl;
+            json_args.clear();
+            if (!std::getline(std::cin, line)) {
+                break;
+            }
+            try {
+                json_args = json::parse(line);
+            }
+            catch (json::parse_error& ex) {
+                last_error = "json parser error";
+                continue;
+            }
+            try {
+                file = json_args.value("file", file);
+                fft_file = json_args.value("fft_file", fft_file);
+                total_time = json_args.value("duration", total_time);
+                freq = json_args.value("freq", freq);
+                nfft = json_args.value("nfft", nfft);
+                nfft_overlap = json_args.value("nfft_overlap", nfft_overlap);
+            }
+            catch (json::basic_json::type_error &ex) {
+                last_error = "json parameter type error";
+                continue;
+            }
+            retune(usrp, channel, freq, lo_offset, int_n);
+            if (!skip_lo) {
+                lo_lock(usrp, ref, channel, setup_time);
+            }
+            recv_to_file(usrp, type, wirefmt, channel,
+                file, fft_file, rate, spb, zlevel, total_num_samps, total_time,
+                useVkFFT, nfft, nfft_overlap, nfft_div, nfft_ds, batches, sample_id);
+            last_error = "";
         }
-        if (ref == "external") {
-            check_locked_sensor(usrp->get_mboard_sensor_names(0),
-                "ref_locked",
-                [usrp](const std::string& sensor_name) {
-                    return usrp->get_mboard_sensor(sensor_name);
-                },
-                setup_time);
+    } else {
+        if (total_num_samps == 0) {
+            std::signal(SIGINT, &sig_int_handler);
+            std::cerr << "Press Ctrl + C to stop streaming..." << std::endl;
         }
+        recv_to_file(usrp, type, wirefmt, channel,
+            file, fft_file, rate, spb, zlevel, total_num_samps, total_time,
+            useVkFFT, nfft, nfft_overlap, nfft_div, nfft_ds, batches, sample_id);
     }
-
-    if (total_num_samps == 0) {
-        std::signal(SIGINT, &sig_int_handler);
-        std::cerr << "Press Ctrl + C to stop streaming..." << std::endl;
-    }
-
-    recv_to_file(usrp, type, wirefmt, channel,
-        file, fft_file, rate, spb, zlevel, total_num_samps, total_time,
-        useVkFFT, nfft, nfft_overlap, nfft_div, nfft_ds, batches, sample_id);
 
     return EXIT_SUCCESS;
 }
