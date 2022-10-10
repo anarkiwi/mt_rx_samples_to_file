@@ -105,6 +105,12 @@ void free_vkfft() {
     free(vkBufferDeviceMemory);
     free(vkConfiguration.bufferSize);
     deleteVkFFT(&vkApp);
+    vkDestroyFence(vkGPU.device, vkGPU.fence, NULL);
+    vkDestroyCommandPool(vkGPU.device, vkGPU.commandPool, NULL);
+    vkDestroyDevice(vkGPU.device, NULL);
+    DestroyDebugUtilsMessengerEXT(&vkGPU, NULL);
+    vkDestroyInstance(vkGPU.instance, NULL);
+    glslang_finalize_process();
 }
 
 
