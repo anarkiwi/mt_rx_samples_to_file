@@ -33,7 +33,7 @@ static boost::atomic<bool> write_samples_worker_done(false);
 static boost::atomic<bool> fft_in_worker_done(false);
 static boost::scoped_ptr<SampleWriter> sample_writer;
 static boost::scoped_ptr<SampleWriter> fft_sample_writer;
-static boost::thread_group writer_threads;
+static boost::scoped_ptr<boost::thread_group> writer_threads;
 
 
 void enqueue_samples(size_t &buffer_ptr) {
@@ -260,15 +260,16 @@ void sample_pipeline_start(const std::string &file, const std::string &fft_file,
     if (fft_file.size()) {
 	fft_sample_writer->open(fft_file, zlevel);
     }
-    writer_threads.add_thread(new boost::thread(write_samples_worker));
-    writer_threads.add_thread(new boost::thread(fft_in_worker));
-    writer_threads.add_thread(new boost::thread(fft_out_worker));
+    writer_threads.reset(new boost::thread_group());
+    writer_threads->add_thread(new boost::thread(write_samples_worker));
+    writer_threads->add_thread(new boost::thread(fft_in_worker));
+    writer_threads->add_thread(new boost::thread(fft_out_worker));
 }
 
 
 void sample_pipeline_stop(size_t overflows) {
     samples_input_done = true;
-    writer_threads.join_all();
+    writer_threads->join_all();
     sample_writer->close(overflows);
     fft_sample_writer->close(overflows);
     if (useVkFFT) {
