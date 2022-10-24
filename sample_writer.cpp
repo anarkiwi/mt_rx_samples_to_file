@@ -19,14 +19,8 @@ std::string get_dotfile(const std::string &file) {
 
 
 SampleWriter::SampleWriter() {
-    outbuf_p = new boost::iostreams::filtering_streambuf<boost::iostreams::output>();
-    out_p = new std::ostream(outbuf_p);
-}
-
-
-SampleWriter::~SampleWriter() {
-    free(out_p);
-    free(outbuf_p);
+    outbuf_p.reset(new boost::iostreams::filtering_streambuf<boost::iostreams::output>());
+    out_p.reset(new std::ostream(outbuf_p.get()));
 }
 
 
