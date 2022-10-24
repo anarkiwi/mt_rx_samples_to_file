@@ -19,14 +19,8 @@ std::string get_dotfile(const std::string &file) {
 
 
 SampleWriter::SampleWriter() {
-    outbuf_p = new boost::iostreams::filtering_streambuf<boost::iostreams::output>();
-    out_p = new std::ostream(outbuf_p);
-}
-
-
-SampleWriter::~SampleWriter() {
-    free(out_p);
-    free(outbuf_p);
+    outbuf_p.reset(new boost::iostreams::filtering_streambuf<boost::iostreams::output>());
+    out_p.reset(new std::ostream(outbuf_p.get()));
 }
 
 
@@ -66,8 +60,7 @@ void SampleWriter::open(const std::string &file, size_t zlevel) {
 void SampleWriter::close(size_t overflows) {
     if (outfile.is_open()) {
 	std::cerr << "closing " << file_ << std::endl;
-	boost::iostreams::close(*outbuf_p);
-	outfile.close();
+        outbuf_p->reset();
 
 	if (overflows) {
 	    std::string dirname(boost::filesystem::canonical(orig_path_.parent_path()).c_str());

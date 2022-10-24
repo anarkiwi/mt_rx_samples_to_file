@@ -25,7 +25,7 @@ static void(*write_samples_p)(size_t &, size_t &);
 static std::pair<arma::cx_fmat, arma::cx_fmat> FFTBuffers[kFFTbuffers];
 static boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbuffers>> in_fft_queue;
 static boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kFFTbuffers>> out_fft_queue;
-static std::pair<boost::scoped_ptr<char>, size_t> sampleBuffers[kSampleBuffers];
+static std::pair<char*, size_t> sampleBuffers[kSampleBuffers];
 static boost::lockfree::spsc_queue<size_t, boost::lockfree::capacity<kSampleBuffers>> sample_queue;
 static arma::cx_fvec fft_samples_in;
 static boost::atomic<bool> samples_input_done(false);
@@ -56,7 +56,14 @@ void set_sample_buffer_capacity(size_t buffer_ptr, size_t buffer_size) {
 void init_sample_buffers() {
     for (size_t i = 0; i < kSampleBuffers; ++i) {
 	set_sample_buffer_capacity(i, max_buffer_size);
-	sampleBuffers[i].first.reset((char*)aligned_alloc(samp_size, max_buffer_size));
+	sampleBuffers[i].first = (char*)aligned_alloc(samp_size, max_buffer_size);
+    }
+}
+
+
+void free_sample_buffers() {
+    for (size_t i = 0; i < kSampleBuffers; ++i) {
+        free(sampleBuffers[i].first);
     }
 }
 
@@ -65,7 +72,7 @@ char *get_sample_buffer(size_t buffer_ptr, size_t *buffer_capacity) {
     if (buffer_capacity) {
 	*buffer_capacity = sampleBuffers[buffer_ptr].second;
     }
-    return sampleBuffers[buffer_ptr].first.get();
+    return sampleBuffers[buffer_ptr].first;
 }
 
 
@@ -275,4 +282,5 @@ void sample_pipeline_stop(size_t overflows) {
     if (useVkFFT) {
 	free_vkfft();
     }
+    free_sample_buffers();
 }
