@@ -7,10 +7,10 @@ jobs:
     - uses: actions/checkout@v3
     - name: test
       run: |
-        sudo apt-get update && sudo apt-get install -qy build-essential cmake libuhd-dev libboost-all-dev cppcheck libarmadillo-dev unzip wget libvulkan-dev && \
+        sudo apt-get update && sudo apt-get install -qy build-essential cmake libuhd-dev libboost-all-dev cppcheck libarmadillo-dev unzip wget libvulkan-dev valgrind && \
         wget https://sourceforge.net/projects/sigpack/files/sigpack-1.2.7.zip -O sigpack.zip && unzip sigpack.zip && ln -s sigpack-*/sigpack . && \
         git clone https://github.com/DTolm/VkFFT -b v1.2.30 && \
         wget https://github.com/nlohmann/json/releases/download/v3.11.2/json.hpp && \
         cd VkFFT && mkdir build && cd build && cmake .. && make -j $(nproc) && cd ../.. && \
-        mkdir build && cd build && cmake .. && make && make test && cd .. && \
+        mkdir build && cd build && cmake .. && make && make test && valgrind --leak-check=yes --error-exitcode=1 ./sample_pipeline_test && cd .. && \
         cppcheck *cpp
