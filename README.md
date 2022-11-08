@@ -101,7 +101,7 @@ sudo apt-get update && sudo apt-get install -qy build-essential cmake cppcheck l
         sudo pip3 install zstandard && \
         sudo /usr/lib/uhd/utils/uhd_images_downloader.py -t "b2|usb" && \
         wget https://sourceforge.net/projects/sigpack/files/sigpack-1.2.7.zip -O sigpack.zip && unzip sigpack.zip && ln -s sigpack-*/sigpack . && \
-        git clone https://github.com/DTolm/VkFFT -b v1.2.30 && \
+        git clone https://github.com/DTolm/VkFFT -b v1.2.31 && \
         wget https://github.com/nlohmann/json/releases/download/v3.11.2/json.hpp && \
         cd VkFFT && mkdir build && cd build && cmake .. && make -j $(nproc) && cd ../.. && \
         mkdir build && cd build && cmake .. && make && cd ..
