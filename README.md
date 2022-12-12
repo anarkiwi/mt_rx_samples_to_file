@@ -1,3 +1,7 @@
+# OBSOLETE
+
+Please see https://github.com/iqtlabs/uhd_sample_recorder.
+
 # mt_rx_samples_to_file
 
 enhanced UHD rx_samples_to_file
